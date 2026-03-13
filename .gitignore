@@ -15,6 +15,11 @@
 # misc
 .DS_Store
 *.pem
+*.log
+*.swp
+*.swo
+*.tmp
+*.temp
 
 # debug
 npm-debug.log*
@@ -28,6 +33,15 @@ yarn-error.log*
 out/
 build/
 dist/
+release/
+.parcel-cache/
+.tmp-parcel/
+.tmp-parcel-cache/
+
+# local IDE/project settings
+.vscode/
+.idea/
+.cursor/
 
 # plasmo - https://www.plasmo.com
 .plasmo

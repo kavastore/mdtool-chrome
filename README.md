@@ -1,56 +1,63 @@
 # mdtool.site Clipper (Chrome Extension)
 
-Web -> clean Markdown -> AI / files / knowledge base.
+Turn web pages and Confluence spaces into clean Markdown for AI workflows, docs, and local knowledge bases.
 
-## Project status
+## Why this project
 
-The extension includes:
+Most clipper tools either lose structure or require backend auth setups for enterprise sources.  
+`mdtool-chrome` is designed to stay local-first, readable, and practical:
 
-- Web clipper hardening (stable extraction pipeline + fallback + detailed errors).
-- Universal web export (single page, history zip, batch tabs zip with per-tab failures).
-- Confluence no-auth export MVP (session-based scan/export, attachments, zip report).
-- Hardening for long Confluence exports (checkpoint/resume, pause/resume, rate limit, retry).
+- robust web extraction with fallbacks,
+- safe Markdown export in single and batch modes,
+- Confluence space export using your existing browser session (no OAuth/token setup),
+- clear failure reporting instead of silent data loss.
 
-## Core features
+## Feature overview
 
-### Web clipper
+### Web clipping
 
 - Extract current tab in modes: `article`, `full`, `selection`, `code`, `tables`.
-- Fallback extraction chain for better reliability (`article -> full -> selection/text`).
-- Clean conversion: sanitized HTML -> normalized Markdown.
-- Frontmatter metadata: source URL/domain/path, timestamps, word count, reading minutes.
-- Save to local history, download `.md`, export history `.zip`.
-- Batch export tabs to `.zip` with detailed failure report.
-- Context menu + hotkey (`Alt+Shift+S`) quick actions.
+- Fallback chain for resilience: `article -> full -> selection/text`.
+- HTML sanitization and markdown normalization.
+- Frontmatter metadata:
+  - source URL/domain/path,
+  - export timestamp,
+  - word count and reading minutes,
+  - extraction mode.
+- Save to history, copy markdown, download `.md`.
+- Export history clips and open tabs into `.zip`.
+- Context-menu actions and hotkey (`Alt+Shift+S`).
 
-### Confluence export (no OAuth, no API key)
+### Confluence export (session-based)
 
-- Input: Space URL or Space key.
-- Scan: crawl Space links in current browser session.
-- Export: page-by-page Markdown + attachments + final zip report.
+- Input by Space URL or Space key.
+- Crawl and export pages available to the currently logged-in browser user.
+- Build markdown tree with attachment rewrite and export reports.
 - Output structure:
   - `confluence/<SPACE>/.../*.md`
   - `confluence/<SPACE>/_attachments/*`
   - `confluence/<SPACE>/_report.json`
-- Long-run resilience:
+- Hardening:
   - checkpoint/resume,
-  - pause/resume/stop,
-  - retry policy for temporary failures,
+  - pause/resume/stop controls,
+  - retry policy for transient failures,
   - rate limiting and periodic pauses,
-  - `ok / skipped / failed` per page.
+  - per-page status (`exported` / `skipped` / `failed`).
 
-## Session-based Confluence mode
+## Privacy and auth model
 
-This extension intentionally uses browser session auth only:
+Confluence integration is intentionally **session-only**:
 
-- user logs into Confluence in a normal browser tab;
-- extension reuses that session to read/export accessible pages;
-- no OAuth flow, no API tokens, no credentials entered in extension UI.
+- no OAuth flow,
+- no API tokens,
+- no credentials entered in extension UI.
+
+The extension reuses your already authenticated browser session and only accesses pages your current user can access.
 
 ## Requirements
 
-- Node.js 18+ (Node 20 recommended)
-- npm 10+
+- Node.js `>=18` (Node 20 recommended)
+- npm `>=10`
 
 ## Local development
 
@@ -67,7 +74,7 @@ Load unpacked extension from `build/chrome-mv3-dev`.
 npm run build
 ```
 
-Build output: `build/chrome-mv3-prod`.
+Output folder: `build/chrome-mv3-prod`.
 
 ## Package release zip
 
@@ -75,9 +82,9 @@ Build output: `build/chrome-mv3-prod`.
 npm run package
 ```
 
-Archive: `build/chrome-mv3-prod.zip`.
+Release archive: `build/chrome-mv3-prod.zip`.
 
-## Install (manual)
+## Manual install
 
 1. Build production version:
    ```bash
@@ -89,15 +96,21 @@ Archive: `build/chrome-mv3-prod.zip`.
 4. Click **Load unpacked**.
 5. Select `build/chrome-mv3-prod`.
 
-## Permissions used
+## Chrome permissions used
 
-- `activeTab`, `scripting`: extract page content and run clipper logic.
-- `storage`: settings/history/debug/checkpoint persistence.
-- `downloads`: save `.md` and export `.zip`.
-- `contextMenus`: right-click quick actions.
-- `sidePanel`: history + Confluence export UI.
-- optional `tabs`: batch export and Confluence crawler/export workflow.
+- `activeTab`, `scripting` - run extraction logic on page context.
+- `storage` - persist settings, history, debug logs, Confluence checkpoint.
+- `downloads` - save markdown and zip exports.
+- `contextMenus` - right-click quick actions.
+- `sidePanel` - history and Confluence export UI.
+- optional `tabs` - batch tab export and Confluence crawling workflow.
+
+## Documentation
+
+- Release history: `CHANGELOG.md`
+- Contribution guide: `CONTRIBUTING.md`
+- Security policy: `SECURITY.md`
 
 ## Repository
 
-Official repository: [kavastore/mdtool-chrome](https://github.com/kavastore/mdtool-chrome)
+GitHub: [kavastore/mdtool-chrome](https://github.com/kavastore/mdtool-chrome)

@@ -4,6 +4,24 @@
   "version": "0.1.0",
   "description": "Web and Confluence session clipper: clean Markdown export, AI handoff, history, batch zip",
   "author": "mdtool.site",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kavastore/mdtool-chrome.git"
+  },
+  "homepage": "https://github.com/kavastore/mdtool-chrome",
+  "bugs": {
+    "url": "https://github.com/kavastore/mdtool-chrome/issues"
+  },
+  "keywords": [
+    "chrome-extension",
+    "markdown",
+    "web-clipper",
+    "confluence",
+    "knowledge-base",
+    "preact",
+    "plasmo"
+  ],
   "scripts": {
     "dev": "plasmo dev",
     "build": "plasmo build && npm run copy-locales",
