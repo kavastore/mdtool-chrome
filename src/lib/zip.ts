@@ -178,13 +178,17 @@ function buildZip(entries: ZipEntryInput[], rootFolder: string): ZipBuildResult 
   return { zip, filesAdded, collisionsResolved }
 }
 
-function decodeBase64(base64: string): Uint8Array {
-  const binary = atob(base64)
-  const bytes = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i)
+function decodeBase64(base64: string): Uint8Array | null {
+  try {
+    const binary = atob(base64)
+    const bytes = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i)
+    }
+    return bytes
+  } catch {
+    return null
   }
-  return bytes
 }
 
 export async function downloadHistoryZip(clips: ClipItem[]): Promise<ZipBuildResult> {
@@ -240,6 +244,8 @@ export async function downloadConfluenceZip(result: ConfluenceExportResult): Pro
 
   for (const attachment of result.attachments) {
     if (!attachment.base64) continue
+    const decoded = decodeBase64(attachment.base64)
+    if (!decoded) continue
     const normalizedPath = attachment.localPath
       .split("/")
       .map((segment) => normalizePathSegment(segment, "file"))
@@ -247,7 +253,7 @@ export async function downloadConfluenceZip(result: ConfluenceExportResult): Pro
     const attachmentPath = `${rootFolder}/${normalizedPath}`
     const resolved = ensureUniquePath(attachmentPath, usedPaths)
     if (resolved.collisionResolved) collisionsResolved += 1
-    zip.file(resolved.path, decodeBase64(attachment.base64), { binary: true })
+    zip.file(resolved.path, decoded, { binary: true })
     filesAdded += 1
   }
 
@@ -267,6 +273,7 @@ export async function downloadConfluenceZip(result: ConfluenceExportResult): Pro
           url: page.url,
           path: page.path,
           status: page.status,
+          skip_reason: page.skipReason ?? null,
           attachments: page.attachments,
           error: page.error
             ? {

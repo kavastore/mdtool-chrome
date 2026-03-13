@@ -49,6 +49,7 @@ const NO_RECEIVER_RE =
 const DEFAULT_AI_URL = AI_SERVICES.find((svc) => svc.id !== "custom")?.url ?? "https://chat.openai.com/"
 const EXTRACTION_REQUEST_TIMEOUT_MS = 15_000
 const CONFLUENCE_SCAN_DEFAULT_MAX_PAGES = 200
+const CONFLUENCE_SCAN_HARD_MAX_PAGES = 2000
 const CONFLUENCE_SCAN_DEFAULT_MAX_DEPTH = 6
 const CONFLUENCE_ATTACHMENTS_PER_PAGE = 8
 const CONFLUENCE_ATTACHMENT_MAX_BYTES = 1_500_000
@@ -171,7 +172,9 @@ chrome.commands.onCommand.addListener(async (command) => {
 
 // ── Message bus (from popup / side panel) ────────────────────────────────────
 
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // Only accept messages from within this extension (popup, side panel, content scripts).
+  if (sender.id !== chrome.runtime.id) return false
   handleMessage(msg)
     .then(sendResponse)
     .catch((error) =>
@@ -249,7 +252,7 @@ async function handleMessage(msg: Record<string, unknown>) {
       const maxPagesRaw = Number(msg.maxPages ?? CONFLUENCE_SCAN_DEFAULT_MAX_PAGES)
       const maxDepthRaw = Number(msg.maxDepth ?? CONFLUENCE_SCAN_DEFAULT_MAX_DEPTH)
       const maxPages = Number.isFinite(maxPagesRaw)
-        ? Math.max(10, Math.min(CONFLUENCE_SCAN_DEFAULT_MAX_PAGES, Math.floor(maxPagesRaw)))
+        ? Math.max(10, Math.min(CONFLUENCE_SCAN_HARD_MAX_PAGES, Math.floor(maxPagesRaw)))
         : CONFLUENCE_SCAN_DEFAULT_MAX_PAGES
       const maxDepth = Number.isFinite(maxDepthRaw)
         ? Math.max(1, Math.min(12, Math.floor(maxDepthRaw)))
@@ -297,6 +300,7 @@ async function handleMessage(msg: Record<string, unknown>) {
             message: error instanceof Error ? error.message : "Confluence scan failed",
           })
         }
+        confluenceProgressSnapshot = null
         return {
           ok: false,
           error: toError(
@@ -373,6 +377,9 @@ async function handleMessage(msg: Record<string, unknown>) {
           skipped: exported.skipped,
           failed: exported.failed,
         })
+        // Clear snapshot after successful completion so stale state isn't
+        // returned to new UI sessions via CONFLUENCE_PROGRESS_GET.
+        confluenceProgressSnapshot = null
         return { ok: true, data: exported }
       } catch (error) {
         const isCancelled = error instanceof Error && error.message === CONFLUENCE_CANCELLED
@@ -384,6 +391,7 @@ async function handleMessage(msg: Record<string, unknown>) {
             message: error instanceof Error ? error.message : "Confluence export failed",
           })
         }
+        confluenceProgressSnapshot = null
         return {
           ok: false,
           error: toError(
@@ -626,16 +634,24 @@ async function consumeConfluenceUiPrefill(): Promise<{ input: string; createdAt:
 function resolveConfluenceSpaceUrlFromPageUrl(url: string): string | null {
   try {
     const parsed = new URL(url)
-    if (!parsed.pathname.includes("/wiki/") && !parsed.pathname.includes("/display/")) return null
+    const { pathname } = parsed
 
     const key = extractConfluenceSpaceKey(url)
     if (!key) return null
     const normalized = normalizeSpaceKey(key)
 
-    if (parsed.pathname.includes("/display/")) {
+    if (pathname.includes("/display/")) {
       return `${parsed.origin}/display/${encodeURIComponent(normalized)}`
     }
-    return `${parsed.origin}/wiki/spaces/${encodeURIComponent(normalized)}`
+    // Modern Atlassian Cloud — no /wiki prefix
+    if (pathname.includes("/spaces/") && !pathname.includes("/wiki/")) {
+      return `${parsed.origin}/spaces/${encodeURIComponent(normalized)}`
+    }
+    // Self-hosted / older Atlassian Cloud — /wiki prefix present
+    if (pathname.includes("/wiki/")) {
+      return `${parsed.origin}/wiki/spaces/${encodeURIComponent(normalized)}`
+    }
+    return null
   } catch {
     return null
   }
@@ -1275,7 +1291,10 @@ async function resolveAiServiceUrl(serviceId: string): Promise<string> {
   }
 
   const service = AI_SERVICES.find((item) => item.id === serviceId)
-  return service?.url || DEFAULT_AI_URL
+  if (!service) {
+    throw new Error(`Unknown AI service: ${serviceId}`)
+  }
+  return service.url
 }
 
 async function clipboardWriteInTab(tabId: number, text: string): Promise<boolean> {
@@ -1298,25 +1317,45 @@ async function clipboardWriteInTab(tabId: number, text: string): Promise<boolean
   }
 }
 
+const BATCH_EXPORT_CONCURRENCY = 3
+
 async function batchExport(tabIds: number[]): Promise<BatchExportResult> {
   const items: ExtractResult[] = []
   const failures: BatchExportResult["failures"] = []
 
-  for (const tabId of tabIds) {
-    const extraction = await injectAndExtract(tabId, "article", {
-      saveToHistory: true,
-      allowFallback: true,
-    })
-    if (extraction.ok) {
-      items.push(extraction.data)
-    } else if ("error" in extraction) {
-      const tabSummary = await resolveTabSummary(tabId)
-      failures.push({
-        tabId,
-        title: tabSummary.title,
-        url: tabSummary.url,
-        error: extraction.error,
+  // Extract in parallel chunks; history writes are kept sequential afterwards
+  // to avoid read-modify-write races in chrome.storage.
+  for (let i = 0; i < tabIds.length; i += BATCH_EXPORT_CONCURRENCY) {
+    const chunk = tabIds.slice(i, i + BATCH_EXPORT_CONCURRENCY)
+    const results = await Promise.all(
+      chunk.map(async (tabId) => {
+        const extraction = await injectAndExtract(tabId, "article", {
+          saveToHistory: false, // history saved sequentially below
+          allowFallback: true,
+        })
+        if (extraction.ok) return { ok: true as const, tabId, data: extraction.data }
+        const tabSummary = await resolveTabSummary(tabId)
+        return {
+          ok: false as const,
+          tabId,
+          title: tabSummary.title,
+          url: tabSummary.url,
+          error: "error" in extraction ? extraction.error : toError("extract-failed", "Extraction failed"),
+        }
       })
+    )
+    for (const r of results) {
+      if (r.ok) items.push(r.data)
+      else failures.push({ tabId: r.tabId, title: r.title, url: r.url, error: r.error })
+    }
+  }
+
+  // Save to history sequentially to prevent storage race conditions.
+  for (const item of items) {
+    try {
+      await persistClip(item)
+    } catch {
+      // Non-fatal — extraction result is still returned to the caller.
     }
   }
 
@@ -1505,8 +1544,13 @@ function cleanConfluenceUrl(url: string): string {
 function extractConfluenceSpaceKey(url: string): string | null {
   try {
     const parsed = new URL(url)
-    const fromSpacesPath = parsed.pathname.match(/\/wiki\/spaces\/([^/]+)/i)?.[1]
+    // /wiki/spaces/KEY (self-hosted / older Atlassian Cloud)
+    const fromWikiSpacesPath = parsed.pathname.match(/\/wiki\/spaces\/([^/]+)/i)?.[1]
+    if (fromWikiSpacesPath) return decodeURIComponent(fromWikiSpacesPath)
+    // /spaces/KEY (modern Atlassian Cloud — no /wiki prefix)
+    const fromSpacesPath = parsed.pathname.match(/\/spaces\/([^/]+)/i)?.[1]
     if (fromSpacesPath) return decodeURIComponent(fromSpacesPath)
+    // Legacy /display/KEY
     const fromDisplayPath = parsed.pathname.match(/\/display\/([^/]+)/i)?.[1]
     if (fromDisplayPath) return decodeURIComponent(fromDisplayPath)
     const fromQuery = parsed.searchParams.get("spaceKey")
@@ -1553,7 +1597,12 @@ function isConfluenceCandidateUrl(url: string, origin: string, spaceKey: string)
   try {
     const parsed = new URL(url)
     if (parsed.origin !== origin) return false
-    if (!parsed.pathname.includes("/wiki/") && !parsed.pathname.includes("/display/")) return false
+    const { pathname } = parsed
+    if (
+      !pathname.includes("/wiki/") &&
+      !pathname.includes("/display/") &&
+      !pathname.includes("/spaces/")
+    ) return false
 
     const linkSpace = extractConfluenceSpaceKey(parsed.toString())
     if (linkSpace && normalizeSpaceKey(linkSpace) !== normalizeSpaceKey(spaceKey)) {
@@ -1622,7 +1671,11 @@ async function resolveConfluenceOriginFromTabs(): Promise<string | null> {
       if (!tab.url) continue
       try {
         const parsed = new URL(tab.url)
-        if (parsed.pathname.includes("/wiki/") || parsed.pathname.includes("/display/")) {
+        if (
+          parsed.pathname.includes("/wiki/") ||
+          parsed.pathname.includes("/display/") ||
+          parsed.pathname.includes("/spaces/")
+        ) {
           return parsed.origin
         }
       } catch {
@@ -2167,7 +2220,11 @@ async function scanConfluencePage(tabId: number): Promise<{
         const abs = toAbs(href)
         if (!abs) continue
         if (abs.startsWith("http://") || abs.startsWith("https://")) {
-          if (abs.includes("/wiki/") || abs.includes("/display/")) {
+          if (
+            abs.includes("/wiki/") ||
+            abs.includes("/display/") ||
+            abs.includes("/spaces/")
+          ) {
             linkSet.add(abs)
           }
         }
@@ -2508,7 +2565,11 @@ async function collectConfluenceAttachmentUrls(tabId: number): Promise<string[]>
       for (const node of Array.from(document.querySelectorAll("a[href]"))) {
         const href = (node as HTMLAnchorElement).getAttribute("href") || ""
         if (!href) continue
-        if (!/download\/attachments|attachment|\.png$|\.jpg$|\.jpeg$|\.gif$|\.webp$|\.svg$|\.pdf$|\.docx?$|\.xlsx?$|\.pptx?$/i.test(href)) {
+        // Match against the URL path only so query-param suffixes like
+        // ?version=3&modificationDate=... don't break extension detection.
+        let hrefPath = href
+        try { hrefPath = new URL(href, location.href).pathname } catch { /* use raw */ }
+        if (!/download\/attachments|\/attachment\/|\.png$|\.jpg$|\.jpeg$|\.gif$|\.webp$|\.svg$|\.pdf$|\.docx?$|\.xlsx?$|\.pptx?$/i.test(hrefPath)) {
           continue
         }
         const abs = toAbs(href)
@@ -2525,13 +2586,14 @@ async function collectConfluenceAttachmentUrls(tabId: number): Promise<string[]>
 
 async function fetchAttachmentsInTab(
   tabId: number,
-  urls: string[]
+  urls: string[],
+  allowedOrigin: string
 ): Promise<Array<{ sourceUrl: string; fileName: string; contentType: string; base64: string; size: number }>> {
   if (urls.length === 0) return []
 
   const [{ result }] = await chrome.scripting.executeScript({
     target: { tabId },
-    func: async (targets: string[], maxBytes: number) => {
+    func: async (targets: string[], maxBytes: number, origin: string) => {
       const toName = (urlValue: string) => {
         try {
           const parsed = new URL(urlValue)
@@ -2557,6 +2619,12 @@ async function fetchAttachmentsInTab(
       const out: Array<{ sourceUrl: string; fileName: string; contentType: string; base64: string; size: number }> = []
       for (const target of targets) {
         try {
+          // Only fetch from the expected Confluence origin to avoid sending
+          // session cookies to third-party hosts.
+          let targetOrigin = ""
+          try { targetOrigin = new URL(target).origin } catch { continue }
+          if (origin && targetOrigin !== origin) continue
+
           const response = await fetch(target, { credentials: "include" })
           if (!response.ok) continue
           const blob = await response.blob()
@@ -2576,7 +2644,7 @@ async function fetchAttachmentsInTab(
       }
       return out
     },
-    args: [urls, CONFLUENCE_ATTACHMENT_MAX_BYTES],
+    args: [urls, CONFLUENCE_ATTACHMENT_MAX_BYTES, allowedOrigin],
   })
 
   return (Array.isArray(result) ? result : []) as Array<{
@@ -2777,6 +2845,29 @@ async function exportConfluencePageOnce(page: ConfluencePageNode, pagePath: stri
   try {
     tabId = await openHiddenTab(page.url)
 
+    // Detect redirect to a different origin (e.g. SSO login page after session expiry).
+    try {
+      const loadedTab = await chrome.tabs.get(tabId)
+      const loadedUrl = loadedTab?.url || ""
+      if (loadedUrl) {
+        const loadedOrigin = new URL(loadedUrl).origin
+        const expectedOrigin = new URL(page.url).origin
+        if (loadedOrigin !== expectedOrigin) {
+          return {
+            pageResult: buildSkippedPageResult(
+              page,
+              "no-access",
+              toError("confluence-no-access", `Page redirected to ${loadedOrigin} — session may have expired`),
+              pagePath
+            ),
+            attachments: [],
+          }
+        }
+      }
+    } catch {
+      // Non-critical — continue with extraction attempt.
+    }
+
     const blockReason = await detectConfluencePageBlock(tabId)
     if (blockReason === "no-access") {
       return {
@@ -2815,8 +2906,9 @@ async function exportConfluencePageOnce(page: ConfluencePageNode, pagePath: stri
     let markdown = extraction.data.markdown
     const pageDir = pagePath.includes("/") ? pagePath.split("/").slice(0, -1).join("/") : ""
 
+    const pageOrigin = (() => { try { return new URL(page.url).origin } catch { return "" } })()
     const attachmentUrls = await withConfluenceRetry(() => collectConfluenceAttachmentUrls(tabId!))
-    const fetchedAttachments = await withConfluenceRetry(() => fetchAttachmentsInTab(tabId!, attachmentUrls))
+    const fetchedAttachments = await withConfluenceRetry(() => fetchAttachmentsInTab(tabId!, attachmentUrls, pageOrigin))
     const rewrites: Array<{ sourceUrl: string; localUrl: string }> = []
     const pageAttachments: ConfluenceAttachmentFile[] = []
     const usedAttachmentNames = new Set<string>()
