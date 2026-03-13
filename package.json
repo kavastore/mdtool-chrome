@@ -2,7 +2,7 @@
   "name": "mdtool-chrome",
   "displayName": "mdtool.site Clipper",
   "version": "0.1.0",
-  "description": "Любая страница → чистый Markdown → в AI за один клик",
+  "description": "Web and Confluence session clipper: clean Markdown export, AI handoff, history, batch zip",
   "author": "mdtool.site",
   "scripts": {
     "dev": "plasmo dev",

@@ -1,6 +1,6 @@
 import type { PlasmoCSConfig } from "plasmo"
 import type { ExtractRequest } from "~lib/types"
-import { extractContent } from "~lib/extractor"
+import { extractContent, normalizeExtractionError } from "~lib/extractor"
 
 export const config: PlasmoCSConfig = {
   matches: ["<all_urls>"],
@@ -16,7 +16,7 @@ chrome.runtime.onMessage.addListener((msg: ExtractRequest, _sender, sendResponse
     const result = extractContent(msg.options)
     sendResponse({ ok: true, data: result })
   } catch (err) {
-    sendResponse({ ok: false, error: String(err) })
+    sendResponse({ ok: false, error: normalizeExtractionError(err) })
   }
 
   return true

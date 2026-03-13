@@ -1,15 +1,58 @@
-import type { ExtractResult } from "./types"
+interface FrontmatterInput {
+  title: string
+  url: string
+  wordCount: number
+  extractionMode?: string
+}
 
-export function buildFrontmatter(result: ExtractResult): string {
+function escapeYamlString(value: string): string {
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/\r?\n/g, " ")
+}
+
+function toDomain(url: string): string {
+  try {
+    return new URL(url).hostname
+  } catch {
+    return "unknown"
+  }
+}
+
+function toPathname(url: string): string {
+  try {
+    const parsed = new URL(url)
+    return `${parsed.pathname || "/"}${parsed.search || ""}`
+  } catch {
+    return "/"
+  }
+}
+
+export function buildFrontmatter(result: FrontmatterInput): string {
   const date = new Date().toISOString()
-  const domain = new URL(result.url).hostname
-  return `---
-title: "${result.title.replace(/"/g, '\\"')}"
-source_url: "${result.url}"
-domain: "${domain}"
-exported_at: "${date}"
-word_count: ${result.wordCount}
----\n\n`
+  const domain = toDomain(result.url)
+  const sourcePath = toPathname(result.url)
+  const readingMinutes = Math.max(1, Math.ceil(result.wordCount / 200))
+  const title = result.title?.trim() || "Untitled page"
+  const lines = [
+    "---",
+    `title: "${escapeYamlString(title)}"`,
+    `source_url: "${escapeYamlString(result.url)}"`,
+    `source_domain: "${escapeYamlString(domain)}"`,
+    `source_path: "${escapeYamlString(sourcePath)}"`,
+    `exported_at: "${date}"`,
+    `word_count: ${result.wordCount}`,
+    `reading_minutes: ${readingMinutes}`,
+  ]
+
+  if (result.extractionMode) {
+    lines.push(`extraction_mode: "${escapeYamlString(result.extractionMode)}"`)
+  }
+
+  lines.push("---\n")
+
+  return `${lines.join("\n")}\n`
 }
 
 export function buildAiPayload(prompt: string, content: string): string {

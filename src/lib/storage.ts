@@ -1,9 +1,11 @@
 import { Storage } from "@plasmohq/storage"
-import type { ClipItem, AppSettings } from "./types"
+import type { ClipItem, AppSettings, DebugLogEntry } from "./types"
 import { STORAGE_KEY_SETTINGS, MAX_HISTORY_ITEMS } from "./constants"
 
 const storage = new Storage()
 const CLIPS_KEY = "mdtool_clips"
+const DEBUG_LOG_KEY = "mdtool_debug_log"
+const MAX_DEBUG_LOG_ITEMS = 80
 
 export const defaultSettings: AppSettings = {
   defaultAiService: "chatgpt",
@@ -40,4 +42,10 @@ export async function deleteClip(id: string): Promise<void> {
 
 export async function clearAllClips(): Promise<void> {
   await storage.set(CLIPS_KEY, [])
+}
+
+export async function appendDebugLog(entry: DebugLogEntry): Promise<void> {
+  const existing = (await storage.get<DebugLogEntry[]>(DEBUG_LOG_KEY)) ?? []
+  const next = [entry, ...existing].slice(0, MAX_DEBUG_LOG_ITEMS)
+  await storage.set(DEBUG_LOG_KEY, next)
 }

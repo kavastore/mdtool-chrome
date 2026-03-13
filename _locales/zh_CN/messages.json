@@ -3,6 +3,7 @@
   "appDescription": { "message": "将任何网页保存为干净的 Markdown，一键发送到 AI。" },
 
   "btnSaveMd": { "message": "保存 .md" },
+  "btnSaveHistory": { "message": "保存到历史" },
   "btnCopy": { "message": "复制" },
   "btnCopied": { "message": "已复制！" },
   "btnOpenMdtool": { "message": "在 mdtool.site 中打开" },
@@ -45,6 +46,11 @@
   "toastError": { "message": "出现错误" },
   "toastUnsupportedPage": { "message": "请先打开普通网页（http/https）" },
   "toastCustomAiMissing": { "message": "请先在设置中填写自定义 AI 地址" },
+  "toastNoSelection": { "message": "请先选中页面内容" },
+  "toastNoContent": { "message": "此页面未找到可读取内容" },
+  "toastNoCodeBlocks": { "message": "此页面未找到代码块" },
+  "toastNoTables": { "message": "此页面未找到表格" },
+  "toastBatchPartial": { "message": "导出完成，但部分标签页被跳过" },
 
   "ctxSavePage": { "message": "将页面保存为 Markdown" },
   "ctxCopyMd": { "message": "复制为 Markdown" },

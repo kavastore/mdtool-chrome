@@ -3,6 +3,7 @@
   "appDescription": { "message": "Сохраняйте страницы в чистый Markdown и отправляйте в AI за один клик." },
 
   "btnSaveMd": { "message": "Скачать .md" },
+  "btnSaveHistory": { "message": "В историю" },
   "btnCopy": { "message": "Копировать" },
   "btnCopied": { "message": "Скопировано!" },
   "btnOpenMdtool": { "message": "Открыть в mdtool.site" },
@@ -45,6 +46,11 @@
   "toastError": { "message": "Что-то пошло не так" },
   "toastUnsupportedPage": { "message": "Сначала откройте обычную страницу (http/https)" },
   "toastCustomAiMissing": { "message": "Сначала укажите URL своего AI в настройках" },
+  "toastNoSelection": { "message": "Сначала выделите текст на странице" },
+  "toastNoContent": { "message": "На странице не найдено читаемого контента" },
+  "toastNoCodeBlocks": { "message": "На странице не найдено блоков кода" },
+  "toastNoTables": { "message": "На странице не найдено таблиц" },
+  "toastBatchPartial": { "message": "Экспорт завершён, часть вкладок пропущена" },
 
   "ctxSavePage": { "message": "Сохранить страницу как Markdown" },
   "ctxCopyMd": { "message": "Копировать как Markdown" },

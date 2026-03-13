@@ -4,7 +4,7 @@ import { t } from "~lib/i18n"
 import { AI_SERVICES, PROMPT_DEFS, EXTRACTION_MODES, MDTOOL_URL } from "~lib/constants"
 import { getSettings, saveSettings } from "~lib/storage"
 import { slugify, buildAiPayload, normalizeUserPrompt, isValidHttpUrl, generateId } from "~lib/utils"
-import type { ExtractResult, ExtractionMode, PromptTemplate } from "~lib/types"
+import type { ExtractResult, ExtractionErrorDetails, ExtractionMode, PromptTemplate } from "~lib/types"
 import "./style.css"
 
 type View = "preview" | "settings" | "onboarding"
@@ -14,6 +14,32 @@ interface PromptOption {
   label: string
   prompt: string
   isCustom?: boolean
+}
+
+type RuntimeErrorPayload = string | ExtractionErrorDetails | undefined
+
+function getErrorCode(error: RuntimeErrorPayload): string {
+  if (!error) return ""
+  if (typeof error === "string") return error
+  return error.code || ""
+}
+
+function resolveExtractionToast(error: RuntimeErrorPayload): string {
+  const code = getErrorCode(error)
+  switch (code) {
+    case "unsupported-url":
+      return t("toastUnsupportedPage")
+    case "empty-selection":
+      return t("toastNoSelection")
+    case "empty-content":
+      return t("toastNoContent")
+    case "no-code-blocks":
+      return t("toastNoCodeBlocks")
+    case "no-tables":
+      return t("toastNoTables")
+    default:
+      return t("toastError")
+  }
 }
 
 function toPromptOptions(customPrompts: PromptTemplate[]): PromptOption[] {
@@ -78,7 +104,7 @@ function App() {
 
   async function extractPage() {
     setLoading(true)
-    const res = await sendMessage<{ ok?: boolean; data?: ExtractResult; error?: string }>({
+    const res = await sendMessage<{ ok?: boolean; data?: ExtractResult; error?: RuntimeErrorPayload }>({
       type: "EXTRACT_AND_PREVIEW",
       mode,
     })
@@ -92,14 +118,7 @@ function App() {
     setResult(null)
     setLoading(false)
 
-    if (res?.error === "unsupported-url") {
-      showToast(t("toastUnsupportedPage"))
-      return
-    }
-
-    if (res?.error) {
-      showToast(t("toastError"))
-    }
+    showToast(resolveExtractionToast(res?.error))
   }
 
   function showToast(msg: string) {
@@ -127,6 +146,15 @@ function App() {
       content: result.markdown,
     })
     showToast(res?.ok ? t("toastExportDone") : t("toastError"))
+  }
+
+  async function handleSaveToHistory() {
+    if (!result) return
+    const res = await sendMessage<{ ok?: boolean; error?: RuntimeErrorPayload }>({
+      type: "SAVE_TO_HISTORY",
+      result,
+    })
+    showToast(res?.ok ? t("toastSaved") : t("toastError"))
   }
 
   function handleOpenMdtool() {
@@ -258,7 +286,8 @@ function App() {
           </div>
 
           {/* Export actions */}
-          <div class="grid grid-cols-3 gap-2">
+          <div class="grid grid-cols-4 gap-2">
+            <ActionBtn icon="💾" onClick={handleSaveToHistory} disabled={!result}>{t("btnSaveHistory")}</ActionBtn>
             <ActionBtn icon="⬇" onClick={handleDownload} disabled={!result}>{t("btnSaveMd")}</ActionBtn>
             <ActionBtn icon="📋" onClick={handleCopy} disabled={!result}>
               {copied ? t("btnCopied") : t("btnCopy")}

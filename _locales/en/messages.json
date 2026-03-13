@@ -3,6 +3,7 @@
   "appDescription": { "message": "Save any page as clean Markdown and send to AI in one click." },
 
   "btnSaveMd": { "message": "Save .md" },
+  "btnSaveHistory": { "message": "Save history" },
   "btnCopy": { "message": "Copy" },
   "btnCopied": { "message": "Copied!" },
   "btnOpenMdtool": { "message": "Open in mdtool.site" },
@@ -45,6 +46,11 @@
   "toastError": { "message": "Something went wrong" },
   "toastUnsupportedPage": { "message": "Open a regular page (http/https) first" },
   "toastCustomAiMissing": { "message": "Set Custom AI URL in Settings first" },
+  "toastNoSelection": { "message": "Select some text first" },
+  "toastNoContent": { "message": "No readable content found on this page" },
+  "toastNoCodeBlocks": { "message": "No code blocks found on this page" },
+  "toastNoTables": { "message": "No tables found on this page" },
+  "toastBatchPartial": { "message": "Export finished with some skipped tabs" },
 
   "ctxSavePage": { "message": "Save page as Markdown" },
   "ctxCopyMd": { "message": "Copy as Markdown" },
