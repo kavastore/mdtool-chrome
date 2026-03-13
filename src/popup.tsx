@@ -1,7 +1,7 @@
 import { h, render } from "preact"
 import { useState, useEffect, useMemo } from "preact/hooks"
 import { t } from "~lib/i18n"
-import { AI_SERVICES, PROMPT_DEFS, EXTRACTION_MODES, MDTOOL_URL } from "~lib/constants"
+import { AI_SERVICES, PROMPT_DEFS, EXTRACTION_MODES, MDTOOL_URL, MDTOOL_UTM } from "~lib/constants"
 import { getSettings, saveSettings } from "~lib/storage"
 import { slugify, buildAiPayload, normalizeUserPrompt, isValidHttpUrl, generateId } from "~lib/utils"
 import type { ExtractResult, ExtractionErrorDetails, ExtractionMode, PromptTemplate } from "~lib/types"
@@ -25,6 +25,34 @@ function getErrorCode(error: RuntimeErrorPayload): string {
 }
 
 function resolveExtractionToast(error: RuntimeErrorPayload): string {
+  if (typeof error === "object" && error?.message) {
+    const code = getErrorCode(error)
+    switch (code) {
+      case "unsupported-url":
+        return t("toastUnsupportedPage")
+      case "empty-selection":
+        return t("toastNoSelection")
+      case "empty-content":
+        return t("toastNoContent")
+      case "no-code-blocks":
+        return t("toastNoCodeBlocks")
+      case "no-tables":
+        return t("toastNoTables")
+      case "confluence-invalid-input":
+        return t("toastConfluenceInvalidInput")
+      case "confluence-cancelled":
+        return t("toastConfluenceCancelled")
+      case "confluence-scan-failed":
+      case "confluence-export-failed":
+        return error.message || t("toastConfluenceFailed")
+      case "content-script-missing":
+      case "extract-failed":
+        return error.message || t("toastError")
+      default:
+        return error.message || t("toastError")
+    }
+  }
+
   const code = getErrorCode(error)
   switch (code) {
     case "unsupported-url":
@@ -37,6 +65,10 @@ function resolveExtractionToast(error: RuntimeErrorPayload): string {
       return t("toastNoCodeBlocks")
     case "no-tables":
       return t("toastNoTables")
+    case "confluence-invalid-input":
+      return t("toastConfluenceInvalidInput")
+    case "confluence-cancelled":
+      return t("toastConfluenceCancelled")
     default:
       return t("toastError")
   }
@@ -74,9 +106,13 @@ function App() {
   const [customPrompt, setCustomPrompt] = useState("")
   const [toast, setToast] = useState("")
   const [copied, setCopied] = useState(false)
+  const [isConfluencePage, setIsConfluencePage] = useState(false)
+  const [confluenceSpaceUrl, setConfluenceSpaceUrl] = useState("")
   const promptOptions = useMemo(() => toPromptOptions(customPrompts), [customPrompts])
 
   useEffect(() => {
+    void loadActiveTabContext()
+
     getSettings().then((s) => {
       const canUseCustomAi = s.defaultAiService !== "custom" || isValidHttpUrl(s.customAiUrl)
       setAiServiceId(canUseCustomAi ? s.defaultAiService : "chatgpt")
@@ -100,6 +136,17 @@ function App() {
     } catch {
       return null
     }
+  }
+
+  async function loadActiveTabContext() {
+    const res = await sendMessage<{
+      ok?: boolean
+      data?: { isConfluence?: boolean; confluenceSpaceUrl?: string | null }
+    }>({ type: "GET_ACTIVE_TAB_CONTEXT" })
+
+    const detected = !!res?.ok && !!res?.data?.isConfluence
+    setIsConfluencePage(detected)
+    setConfluenceSpaceUrl(detected ? String(res?.data?.confluenceSpaceUrl || "") : "")
   }
 
   async function extractPage() {
@@ -157,14 +204,28 @@ function App() {
     showToast(res?.ok ? t("toastSaved") : t("toastError"))
   }
 
-  function handleOpenMdtool() {
+  async function handleOpenMdtool() {
     if (!result) return
-    const params = new URLSearchParams({
-      utm_source: "chrome_extension",
-      utm_medium: "clipper",
-      content: result.markdown.slice(0, 8000),
+    let copied = false
+    try {
+      await navigator.clipboard.writeText(result.markdown)
+      copied = true
+    } catch {
+      copied = false
+    }
+
+    const uiLang = chrome.i18n.getUILanguage().toLowerCase()
+    const localePath = uiLang.startsWith("ru") ? "/ru" : ""
+    await chrome.tabs.create({ url: `${MDTOOL_URL}${localePath}${MDTOOL_UTM}` })
+    showToast(copied ? t("toastContentCopied") : t("toastMdtoolOpenedNoClipboard"))
+  }
+
+  async function handleOpenConfluenceExport() {
+    const res = await sendMessage<{ ok?: boolean; error?: RuntimeErrorPayload }>({
+      type: "OPEN_CONFLUENCE_EXPORT",
+      input: confluenceSpaceUrl,
     })
-    chrome.tabs.create({ url: `${MDTOOL_URL}/?${params.toString()}` })
+    showToast(res?.ok ? t("toastConfluencePanelOpened") : resolveExtractionToast(res?.error))
   }
 
   async function handleSendAi() {
@@ -219,7 +280,7 @@ function App() {
       return
     }
 
-    showToast(t("toastError"))
+    showToast(t("toastAiOpenedNoClipboard"))
   }
 
   if (view === "onboarding") {
@@ -261,6 +322,18 @@ function App() {
               </button>
             ))}
           </div>
+
+          {isConfluencePage && (
+            <div class="rounded-lg border border-emerald-700/60 bg-emerald-950/30 px-3 py-2 flex items-center justify-between gap-2">
+              <div class="text-xs text-emerald-200">{t("popupConfluenceDetected")}</div>
+              <button
+                onClick={handleOpenConfluenceExport}
+                class="px-2 py-1 rounded text-xs border border-emerald-600 text-emerald-200 hover:bg-emerald-900/40 transition-colors"
+              >
+                {t("btnOpenConfluenceExport")}
+              </button>
+            </div>
+          )}
 
           {/* Preview area */}
           <div class="relative flex-1 rounded-lg border border-zinc-800 bg-zinc-900 overflow-hidden">

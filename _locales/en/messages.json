@@ -12,6 +12,7 @@
   "btnExportAll": { "message": "Export all tabs" },
   "btnExportZip": { "message": "Download .zip" },
   "btnClearHistory": { "message": "Clear history" },
+  "btnOpenConfluenceExport": { "message": "Open Confluence Export" },
 
   "labelPreview": { "message": "Preview" },
   "labelHistory": { "message": "History" },
@@ -30,8 +31,34 @@
   "labelScanned": { "message": "scanned" },
   "labelSkipped": { "message": "skipped" },
   "labelFailed": { "message": "failed" },
+  "labelSelectedPages": {
+    "message": "selected $1/$2",
+    "placeholders": {
+      "1": { "content": "$1" },
+      "2": { "content": "$2" }
+    }
+  },
   "labelExported": { "message": "exported" },
   "labelAttachments": { "message": "attachments" },
+  "labelProgress": { "message": "progress" },
+  "labelProcessed": { "message": "processed" },
+  "labelQueued": { "message": "queued" },
+  "labelCurrent": { "message": "current" },
+  "labelStageScan": { "message": "scan" },
+  "labelStageExport": { "message": "export" },
+  "labelStatusRunning": { "message": "running" },
+  "labelStatusPaused": { "message": "paused" },
+  "labelStatusCompleted": { "message": "completed" },
+  "labelStatusCancelled": { "message": "cancelled" },
+  "labelStatusFailed": { "message": "failed" },
+  "labelScanFailureDetails": {
+    "message": "scan errors: $1",
+    "placeholders": { "1": { "content": "$1" } }
+  },
+  "labelScanFailureMore": {
+    "message": "and $1 more...",
+    "placeholders": { "1": { "content": "$1" } }
+  },
 
   "modeArticle": { "message": "Article" },
   "modeFull": { "message": "Full page" },
@@ -62,6 +89,8 @@
   "toastNoCodeBlocks": { "message": "No code blocks found on this page" },
   "toastNoTables": { "message": "No tables found on this page" },
   "toastBatchPartial": { "message": "Export finished with some skipped tabs" },
+  "toastAiOpenedNoClipboard": { "message": "AI opened, but clipboard write is blocked. Use Copy and paste manually with Ctrl+V." },
+  "toastMdtoolOpenedNoClipboard": { "message": "mdtool.site opened, but clipboard write is blocked. Use Copy first." },
   "toastGrantTabsExport": { "message": "Grant tabs permission to export tabs" },
   "toastConfluenceInvalidInput": { "message": "Enter a valid Confluence Space URL or key" },
   "toastConfluenceNoPages": { "message": "No pages found in this Confluence Space" },
@@ -70,6 +99,7 @@
   "toastConfluenceFailed": { "message": "Confluence operation failed" },
   "toastConfluenceGrantTabsScan": { "message": "Grant tabs permission to scan Confluence pages" },
   "toastConfluenceRunScanFirst": { "message": "Run scan first" },
+  "toastConfluenceSelectAtLeastOnePage": { "message": "Select at least one page to export" },
   "toastConfluenceStopping": { "message": "Stopping..." },
   "toastConfluenceResumed": { "message": "Resumed" },
   "toastConfluencePaused": { "message": "Paused" },
@@ -95,6 +125,8 @@
     }
   },
   "toastConfluenceExportComplete": { "message": "Confluence export complete" },
+  "toastConfluencePrefilled": { "message": "Confluence export input was prefilled from current page" },
+  "toastConfluencePanelOpened": { "message": "Confluence export opened in side panel" },
 
   "ctxSavePage": { "message": "Save page as Markdown" },
   "ctxCopyMd": { "message": "Copy as Markdown" },
@@ -116,6 +148,7 @@
   "confluenceIntro": { "message": "Enter Confluence Space URL or key, then scan pages and export zip." },
   "confluenceInputPlaceholder": { "message": "https://your-domain.atlassian.net/wiki/spaces/SPACE" },
   "confluenceNoPagesYet": { "message": "No scanned pages yet." },
+  "popupConfluenceDetected": { "message": "Confluence page detected" },
   "customPromptPlaceholder": { "message": "Enter your prompt…" },
   "customAiUrl": { "message": "Custom AI URL" },
   "customAiUrlPlaceholder": { "message": "https://…" },
@@ -128,6 +161,8 @@
   "btnStop": { "message": "Stop" },
   "btnLoad": { "message": "Load" },
   "btnClear": { "message": "Clear" },
+  "btnSelectAll": { "message": "Select all" },
+  "btnSelectNone": { "message": "Clear selection" },
 
   "settingsDefaultAi": { "message": "Default AI service" },
   "settingsDefaultPrompt": { "message": "Default prompt" },

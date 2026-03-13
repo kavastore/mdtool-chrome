@@ -59,9 +59,14 @@
       "activeTab",
       "scripting",
       "storage",
+      "clipboardWrite",
       "downloads",
       "contextMenus",
       "sidePanel"
+    ],
+    "host_permissions": [
+      "*://*.atlassian.net/*",
+      "*://*.atlassian.com/*"
     ],
     "optional_permissions": [
       "alarms",

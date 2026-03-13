@@ -2,7 +2,7 @@ import type { AiService, PromptTemplate, ExtractionMode } from "./types"
 import type { MessageKey } from "./i18n"
 
 export const AI_SERVICES: AiService[] = [
-  { id: "chatgpt", label: "ChatGPT", url: "https://chat.openai.com/", icon: "🤖" },
+  { id: "chatgpt", label: "ChatGPT", url: "https://chatgpt.com/", icon: "🤖" },
   { id: "claude", label: "Claude", url: "https://claude.ai/new", icon: "🟠" },
   { id: "gemini", label: "Gemini", url: "https://gemini.google.com/app", icon: "✨" },
   { id: "grok", label: "Grok", url: "https://grok.com/", icon: "𝕏" },

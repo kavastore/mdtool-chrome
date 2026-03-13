@@ -12,6 +12,7 @@
   "btnExportAll": { "message": "导出所有标签页" },
   "btnExportZip": { "message": "下载 .zip" },
   "btnClearHistory": { "message": "清除历史记录" },
+  "btnOpenConfluenceExport": { "message": "打开 Confluence 导出" },
 
   "labelPreview": { "message": "预览" },
   "labelHistory": { "message": "历史记录" },
@@ -30,8 +31,34 @@
   "labelScanned": { "message": "已扫描" },
   "labelSkipped": { "message": "已跳过" },
   "labelFailed": { "message": "失败" },
+  "labelSelectedPages": {
+    "message": "已选择 $1/$2",
+    "placeholders": {
+      "1": { "content": "$1" },
+      "2": { "content": "$2" }
+    }
+  },
   "labelExported": { "message": "已导出" },
   "labelAttachments": { "message": "附件" },
+  "labelProgress": { "message": "进度" },
+  "labelProcessed": { "message": "已处理" },
+  "labelQueued": { "message": "队列中" },
+  "labelCurrent": { "message": "当前页面" },
+  "labelStageScan": { "message": "扫描" },
+  "labelStageExport": { "message": "导出" },
+  "labelStatusRunning": { "message": "进行中" },
+  "labelStatusPaused": { "message": "已暂停" },
+  "labelStatusCompleted": { "message": "已完成" },
+  "labelStatusCancelled": { "message": "已取消" },
+  "labelStatusFailed": { "message": "失败" },
+  "labelScanFailureDetails": {
+    "message": "扫描错误：$1",
+    "placeholders": { "1": { "content": "$1" } }
+  },
+  "labelScanFailureMore": {
+    "message": "另有 $1 条...",
+    "placeholders": { "1": { "content": "$1" } }
+  },
 
   "modeArticle": { "message": "文章" },
   "modeFull": { "message": "整页" },
@@ -62,6 +89,8 @@
   "toastNoCodeBlocks": { "message": "此页面未找到代码块" },
   "toastNoTables": { "message": "此页面未找到表格" },
   "toastBatchPartial": { "message": "导出完成，但部分标签页被跳过" },
+  "toastAiOpenedNoClipboard": { "message": "AI 已打开，但无法写入剪贴板。请先点击复制，再手动 Ctrl+V 粘贴。" },
+  "toastMdtoolOpenedNoClipboard": { "message": "mdtool.site 已打开，但无法写入剪贴板。请先点击复制。" },
   "toastGrantTabsExport": { "message": "请授予 tabs 权限以导出标签页" },
   "toastConfluenceInvalidInput": { "message": "请输入有效的 Confluence Space URL 或 Key" },
   "toastConfluenceNoPages": { "message": "该 Confluence Space 未找到页面" },
@@ -70,6 +99,7 @@
   "toastConfluenceFailed": { "message": "Confluence 操作失败" },
   "toastConfluenceGrantTabsScan": { "message": "请授予 tabs 权限以扫描 Confluence 页面" },
   "toastConfluenceRunScanFirst": { "message": "请先执行扫描" },
+  "toastConfluenceSelectAtLeastOnePage": { "message": "请至少选择一个页面进行导出" },
   "toastConfluenceStopping": { "message": "正在停止..." },
   "toastConfluenceResumed": { "message": "已继续" },
   "toastConfluencePaused": { "message": "已暂停" },
@@ -95,6 +125,8 @@
     }
   },
   "toastConfluenceExportComplete": { "message": "Confluence 导出完成" },
+  "toastConfluencePrefilled": { "message": "已根据当前页面自动填充 Confluence 导出输入" },
+  "toastConfluencePanelOpened": { "message": "已在侧边栏打开 Confluence 导出" },
 
   "ctxSavePage": { "message": "将页面保存为 Markdown" },
   "ctxCopyMd": { "message": "复制为 Markdown" },
@@ -116,6 +148,7 @@
   "confluenceIntro": { "message": "输入 Confluence Space URL 或 Key，然后扫描页面并导出 zip。" },
   "confluenceInputPlaceholder": { "message": "https://your-domain.atlassian.net/wiki/spaces/SPACE" },
   "confluenceNoPagesYet": { "message": "尚无已扫描页面。" },
+  "popupConfluenceDetected": { "message": "检测到 Confluence 页面" },
   "customPromptPlaceholder": { "message": "输入提示词…" },
   "customAiUrl": { "message": "自定义 AI 地址" },
   "customAiUrlPlaceholder": { "message": "https://…" },
@@ -128,6 +161,8 @@
   "btnStop": { "message": "停止" },
   "btnLoad": { "message": "加载" },
   "btnClear": { "message": "清除" },
+  "btnSelectAll": { "message": "全选" },
+  "btnSelectNone": { "message": "清空选择" },
 
   "settingsDefaultAi": { "message": "默认 AI 服务" },
   "settingsDefaultPrompt": { "message": "默认提示词" },

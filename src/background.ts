@@ -6,7 +6,9 @@ import type {
   ConfluenceExportPageResult,
   ConfluenceExportResult,
   ConfluencePageNode,
+  ConfluenceProgressPayload,
   ConfluenceScanResult,
+  ConfluenceScanDebugReport,
   DebugLogEntry,
   ExtractResult,
   ExtractionAttemptReport,
@@ -42,25 +44,32 @@ const MENU_IDS = {
 } as const
 
 const NO_RECEIVER_RE =
-  /Receiving end does not exist|Could not establish connection|The message port closed before a response was received/i
+  /Receiving end does not exist|Could not establish connection|The message port closed before a response was received|Не удалось установить соединение|Принимающая сторона отсутствует|порт сообщения закрыт/i
 
 const DEFAULT_AI_URL = AI_SERVICES.find((svc) => svc.id !== "custom")?.url ?? "https://chat.openai.com/"
+const EXTRACTION_REQUEST_TIMEOUT_MS = 15_000
 const CONFLUENCE_SCAN_DEFAULT_MAX_PAGES = 200
 const CONFLUENCE_SCAN_DEFAULT_MAX_DEPTH = 6
 const CONFLUENCE_ATTACHMENTS_PER_PAGE = 8
 const CONFLUENCE_ATTACHMENT_MAX_BYTES = 1_500_000
+const CONFLUENCE_API_PAGE_LIMIT = 100
+const CONFLUENCE_API_V1_PAGE_LIMIT = 50
 const CONFLUENCE_RATE_DELAY_MS = 350
 const CONFLUENCE_RATE_PAUSE_EVERY = 15
 const CONFLUENCE_RATE_PAUSE_MS = 1200
 const CONFLUENCE_RETRY_ATTEMPTS = 3
 const CONFLUENCE_RETRY_DELAY_MS = 400
 const CONFLUENCE_CHECKPOINT_KEY = "mdtool_confluence_checkpoint"
+const CONFLUENCE_UI_PREFILL_KEY = "mdtool_confluence_ui_prefill"
 const CONFLUENCE_CANCELLED = "CONFLUENCE_CANCELLED"
 
 const confluenceJobState = {
   cancelRequested: false,
   paused: false,
+  stage: null as ConfluenceProgressPayload["stage"] | null,
 }
+
+let confluenceProgressSnapshot: ConfluenceProgressPayload | null = null
 
 chrome.runtime.onInstalled.addListener(() => {
   void rebuildContextMenus()
@@ -248,11 +257,46 @@ async function handleMessage(msg: Record<string, unknown>) {
 
       confluenceJobState.cancelRequested = false
       confluenceJobState.paused = false
+      confluenceJobState.stage = "scan"
+      updateConfluenceProgress({
+        stage: "scan",
+        status: "started",
+        spaceKey: normalizeSpaceKey(extractConfluenceSpaceKey(input) || input || "SPACE"),
+        spaceUrl: input || "",
+        processed: 0,
+        total: maxPages,
+        queued: 1,
+        scanned: 0,
+        exported: 0,
+        skipped: 0,
+        failed: 0,
+      })
       try {
         const scan = await scanConfluenceSpace(input, { maxPages, maxDepth })
+        updateConfluenceProgress({
+          stage: "scan",
+          status: "completed",
+          spaceKey: scan.spaceKey,
+          spaceUrl: scan.spaceUrl,
+          processed: scan.scanned + scan.failed,
+          total: scan.scanned + scan.failed,
+          queued: 0,
+          scanned: scan.scanned,
+          exported: 0,
+          skipped: scan.skipped,
+          failed: scan.failed,
+        })
         return { ok: true, data: scan }
       } catch (error) {
         const isCancelled = error instanceof Error && error.message === CONFLUENCE_CANCELLED
+        const snapshot = confluenceProgressSnapshot
+        if (snapshot?.stage === "scan") {
+          updateConfluenceProgress({
+            ...snapshot,
+            status: isCancelled ? "cancelled" : "failed",
+            message: error instanceof Error ? error.message : "Confluence scan failed",
+          })
+        }
         return {
           ok: false,
           error: toError(
@@ -264,6 +308,8 @@ async function handleMessage(msg: Record<string, unknown>) {
                 : "Confluence scan failed"
           ),
         }
+      } finally {
+        confluenceJobState.stage = null
       }
     }
 
@@ -277,13 +323,67 @@ async function handleMessage(msg: Record<string, unknown>) {
       }
 
       const resume = msg.resume !== false
+      const selectedPageIds = Array.isArray(msg.selectedPageIds)
+        ? msg.selectedPageIds
+            .map((value: unknown) => String(value))
+            .filter((value: string) => !!value)
+        : null
+      const selectedPageIdSet = selectedPageIds ? new Set(selectedPageIds) : null
+      const pagesToExport = selectedPageIdSet
+        ? scan.pages.filter((page) => selectedPageIdSet.has(page.id))
+        : scan.pages
+      if (pagesToExport.length === 0) {
+        return {
+          ok: false,
+          error: toError("confluence-no-pages", "No pages selected for export"),
+        }
+      }
+
       confluenceJobState.cancelRequested = false
       confluenceJobState.paused = false
+      confluenceJobState.stage = "export"
+      updateConfluenceProgress({
+        stage: "export",
+        status: "started",
+        spaceKey: scan.spaceKey,
+        spaceUrl: scan.spaceUrl,
+        processed: 0,
+        total: pagesToExport.length,
+        queued: pagesToExport.length,
+        scanned: scan.scanned,
+        exported: 0,
+        skipped: 0,
+        failed: 0,
+      })
       try {
-        const exported = await exportConfluenceSpace(scan, { resume })
+        const exported = await exportConfluenceSpace(scan, {
+          resume,
+          selectedPageIds: selectedPageIdSet || undefined,
+        })
+        updateConfluenceProgress({
+          stage: "export",
+          status: "completed",
+          spaceKey: exported.spaceKey,
+          spaceUrl: exported.spaceUrl,
+          processed: exported.pages.length,
+          total: exported.pages.length,
+          queued: 0,
+          scanned: scan.scanned,
+          exported: exported.exported,
+          skipped: exported.skipped,
+          failed: exported.failed,
+        })
         return { ok: true, data: exported }
       } catch (error) {
         const isCancelled = error instanceof Error && error.message === CONFLUENCE_CANCELLED
+        const snapshot = confluenceProgressSnapshot
+        if (snapshot?.stage === "export") {
+          updateConfluenceProgress({
+            ...snapshot,
+            status: isCancelled ? "cancelled" : "failed",
+            message: error instanceof Error ? error.message : "Confluence export failed",
+          })
+        }
         return {
           ok: false,
           error: toError(
@@ -295,22 +395,43 @@ async function handleMessage(msg: Record<string, unknown>) {
                 : "Confluence export failed"
           ),
         }
+      } finally {
+        confluenceJobState.stage = null
       }
     }
 
     case "CONFLUENCE_CANCEL": {
       confluenceJobState.cancelRequested = true
       confluenceJobState.paused = false
+      if (confluenceProgressSnapshot && confluenceJobState.stage) {
+        updateConfluenceProgress({
+          ...confluenceProgressSnapshot,
+          status: "cancelled",
+          message: "Cancellation requested",
+        })
+      }
       return { ok: true }
     }
 
     case "CONFLUENCE_PAUSE": {
       confluenceJobState.paused = true
+      if (confluenceProgressSnapshot && confluenceJobState.stage) {
+        updateConfluenceProgress({
+          ...confluenceProgressSnapshot,
+          status: "paused",
+        })
+      }
       return { ok: true }
     }
 
     case "CONFLUENCE_RESUME": {
       confluenceJobState.paused = false
+      if (confluenceProgressSnapshot && confluenceJobState.stage) {
+        updateConfluenceProgress({
+          ...confluenceProgressSnapshot,
+          status: "running",
+        })
+      }
       return { ok: true }
     }
 
@@ -326,6 +447,96 @@ async function handleMessage(msg: Record<string, unknown>) {
 
     case "SETTINGS_UPDATED": {
       await rebuildContextMenus()
+      return { ok: true }
+    }
+
+    case "CONFLUENCE_PROGRESS_GET": {
+      return { ok: true, data: confluenceProgressSnapshot }
+    }
+
+    case "CONFLUENCE_UI_PREFILL_CONSUME": {
+      const prefill = await consumeConfluenceUiPrefill()
+      return { ok: true, data: prefill }
+    }
+
+    case "GET_ACTIVE_TAB_CONTEXT": {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+      const url = tab?.url || ""
+      const confluenceSpaceUrl = url ? resolveConfluenceSpaceUrlFromPageUrl(url) : null
+      return {
+        ok: true,
+        data: {
+          tabId: tab?.id ?? null,
+          windowId: tab?.windowId ?? null,
+          url,
+          title: tab?.title || "",
+          isConfluence: !!confluenceSpaceUrl,
+          confluenceSpaceUrl,
+        },
+      }
+    }
+
+    case "OPEN_CONFLUENCE_EXPORT": {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+      const seedInput = String(msg.input ?? "").trim()
+      const fallbackInput = tab?.url ? resolveConfluenceSpaceUrlFromPageUrl(tab.url) || tab.url : ""
+      const input = seedInput || fallbackInput
+      if (!input) {
+        return { ok: false, error: toError("confluence-invalid-input", "Confluence page URL not found") }
+      }
+
+      await saveConfluenceUiPrefill(input)
+
+      const sidePanelApi = chrome.sidePanel as
+        | {
+            setOptions?: (options: { tabId: number; path: string; enabled: boolean }) => Promise<void>
+            open?: (options: { tabId?: number; windowId?: number }) => Promise<void>
+          }
+        | undefined
+
+      let opened = false
+      let openErrorMessage = ""
+
+      if (tab?.id && sidePanelApi && typeof sidePanelApi.open === "function") {
+        try {
+          if (typeof sidePanelApi.setOptions === "function") {
+            await sidePanelApi.setOptions({ tabId: tab.id, path: "sidepanel.html", enabled: true })
+          }
+        } catch {
+          // Ignore setOptions failures, open attempt can still work.
+        }
+
+        try {
+          await sidePanelApi.open({ tabId: tab.id })
+          opened = true
+        } catch (error) {
+          if (typeof tab.windowId === "number") {
+            try {
+              await sidePanelApi.open({ windowId: tab.windowId })
+              opened = true
+            } catch (windowError) {
+              openErrorMessage = windowError instanceof Error ? windowError.message : "Failed to open side panel"
+            }
+          } else {
+            openErrorMessage = error instanceof Error ? error.message : "Failed to open side panel"
+          }
+        }
+      }
+
+      if (!opened) {
+        try {
+          await chrome.tabs.create({ url: chrome.runtime.getURL("sidepanel.html") })
+          opened = true
+        } catch (error) {
+          const fallbackError = error instanceof Error ? error.message : "Could not open Confluence export UI"
+          return { ok: false, error: toError("confluence-scan-failed", fallbackError) }
+        }
+      }
+
+      return { ok: true, data: { input, opened, openErrorMessage } }
+    }
+
+    case "CONFLUENCE_PROGRESS": {
       return { ok: true }
     }
 
@@ -368,6 +579,66 @@ async function tryInjectClipperScript(tabId: number): Promise<boolean> {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function emitConfluenceProgress(payload: ConfluenceProgressPayload): void {
+  confluenceProgressSnapshot = payload
+  chrome.runtime.sendMessage({ type: "CONFLUENCE_PROGRESS", data: payload }, () => {
+    void chrome.runtime.lastError
+  })
+}
+
+function updateConfluenceProgress(next: Omit<ConfluenceProgressPayload, "updatedAt">): void {
+  emitConfluenceProgress({
+    ...next,
+    updatedAt: new Date().toISOString(),
+  })
+}
+
+async function saveConfluenceUiPrefill(input: string): Promise<void> {
+  const payload = {
+    input,
+    createdAt: new Date().toISOString(),
+  }
+  await new Promise<void>((resolve) => {
+    chrome.storage.local.set({ [CONFLUENCE_UI_PREFILL_KEY]: payload }, () => resolve())
+  })
+}
+
+async function consumeConfluenceUiPrefill(): Promise<{ input: string; createdAt: string } | null> {
+  const payload = await new Promise<{ input?: string; createdAt?: string } | null>((resolve) => {
+    chrome.storage.local.get([CONFLUENCE_UI_PREFILL_KEY], (data) => {
+      resolve((data?.[CONFLUENCE_UI_PREFILL_KEY] as { input?: string; createdAt?: string } | undefined) ?? null)
+    })
+  })
+
+  await new Promise<void>((resolve) => {
+    chrome.storage.local.remove([CONFLUENCE_UI_PREFILL_KEY], () => resolve())
+  })
+
+  if (!payload?.input) return null
+  return {
+    input: String(payload.input),
+    createdAt: payload.createdAt ? String(payload.createdAt) : new Date().toISOString(),
+  }
+}
+
+function resolveConfluenceSpaceUrlFromPageUrl(url: string): string | null {
+  try {
+    const parsed = new URL(url)
+    if (!parsed.pathname.includes("/wiki/") && !parsed.pathname.includes("/display/")) return null
+
+    const key = extractConfluenceSpaceKey(url)
+    if (!key) return null
+    const normalized = normalizeSpaceKey(key)
+
+    if (parsed.pathname.includes("/display/")) {
+      return `${parsed.origin}/display/${encodeURIComponent(normalized)}`
+    }
+    return `${parsed.origin}/wiki/spaces/${encodeURIComponent(normalized)}`
+  } catch {
+    return null
+  }
 }
 
 type ExtractAttempt =
@@ -519,41 +790,75 @@ async function handleAiContextAction(
 
 function requestExtractionFromTab(tabId: number, mode: ExtractionMode): Promise<ExtractAttempt> {
   return new Promise((resolve) => {
-    chrome.tabs.sendMessage(
-      tabId,
-      {
-        type: mode === "selection" ? "EXTRACT_SELECTION" : "EXTRACT_PAGE",
-        options: { mode, includeFrontmatter: true, includeImages: false },
-      },
-      (res) => {
-        const lastError = chrome.runtime.lastError
-        if (lastError) {
-          resolve({
-            ok: false,
-            mode,
-            error: toError(
-              "content-script-missing",
-              lastError.message || "Content script is not available for this page",
+    let settled = false
+    const finalize = (result: ExtractAttempt) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      resolve(result)
+    }
+
+    const timeout = setTimeout(() => {
+      finalize({
+        ok: false,
+        mode,
+        error: toError(
+          "extract-failed",
+          `Content extraction timeout after ${Math.floor(EXTRACTION_REQUEST_TIMEOUT_MS / 1000)}s`,
+          mode,
+          "extracting"
+        ),
+      })
+    }, EXTRACTION_REQUEST_TIMEOUT_MS)
+
+    try {
+      chrome.tabs.sendMessage(
+        tabId,
+        {
+          type: mode === "selection" ? "EXTRACT_SELECTION" : "EXTRACT_PAGE",
+          options: { mode, includeFrontmatter: true, includeImages: false },
+        },
+        (res) => {
+          const lastError = chrome.runtime.lastError
+          if (lastError) {
+            finalize({
+              ok: false,
               mode,
-              "extracting"
-            ),
-            noReceiver: NO_RECEIVER_RE.test(lastError.message || ""),
-          })
-          return
-        }
+              error: toError(
+                "content-script-missing",
+                lastError.message || "Content script is not available for this page",
+                mode,
+                "extracting"
+              ),
+              noReceiver: NO_RECEIVER_RE.test(lastError.message || ""),
+            })
+            return
+          }
 
-        if (!res?.ok) {
-          resolve({
-            ok: false,
-            mode,
-            error: normalizeResponseError(res?.error, mode),
-          })
-          return
-        }
+          if (!res?.ok) {
+            finalize({
+              ok: false,
+              mode,
+              error: normalizeResponseError(res?.error, mode),
+            })
+            return
+          }
 
-        resolve({ ok: true, mode, data: res.data as ExtractResult })
-      }
-    )
+          finalize({ ok: true, mode, data: res.data as ExtractResult })
+        }
+      )
+    } catch (error) {
+      finalize({
+        ok: false,
+        mode,
+        error: toError(
+          "extract-failed",
+          error instanceof Error ? error.message : "Failed to send extraction request",
+          mode,
+          "extracting"
+        ),
+      })
+    }
   })
 }
 
@@ -569,6 +874,16 @@ async function injectAndExtract(
   const hasSelection = options.allowFallback ? await tabHasSelection(tabId) : false
   const modePlan = buildModePlan(mode, hasSelection, options.allowFallback)
   let lastError = toError("extract-failed", "Extraction failed", mode, "extracting")
+  const hasStructuredPlan = modePlan.some((plannedMode) => plannedMode !== "text")
+  let clipperInjected = false
+
+  // Pre-inject once so extraction works even when content script did not attach automatically.
+  if (hasStructuredPlan) {
+    clipperInjected = await tryInjectClipperScript(tabId)
+    if (clipperInjected) {
+      await sleep(60)
+    }
+  }
 
   for (const plannedMode of modePlan) {
     pushPhase(report, "extracting")
@@ -578,12 +893,19 @@ async function injectAndExtract(
         ? await extractPlainTextFromTab(tabId)
         : await requestExtractionFromTab(tabId, plannedMode)
 
-    if (!attempt.ok && "noReceiver" in attempt && attempt.noReceiver && plannedMode !== "text") {
+    // Retry after explicit reinjection whenever content script is unavailable.
+    if (
+      !attempt.ok &&
+      plannedMode !== "text" &&
+      "error" in attempt &&
+      attempt.error.code === "content-script-missing"
+    ) {
       const injected = await tryInjectClipperScript(tabId)
+      clipperInjected = clipperInjected || injected
       if (injected) {
         await sleep(60)
         attempt = await requestExtractionFromTab(tabId, plannedMode)
-        if (!attempt.ok && "noReceiver" in attempt && attempt.noReceiver) {
+        if (!attempt.ok && "error" in attempt && attempt.error.code === "content-script-missing") {
           await sleep(160)
           attempt = await requestExtractionFromTab(tabId, plannedMode)
         }
@@ -860,7 +1182,7 @@ async function writeDebugLog(entry: {
   kind: DebugLogEntry["kind"]
   tabId?: number
   tabUrl?: string
-  report: ExtractionOperationReport
+  report: ExtractionOperationReport | ConfluenceScanDebugReport
 }): Promise<void> {
   try {
     await appendDebugLog({
@@ -874,6 +1196,30 @@ async function writeDebugLog(entry: {
   } catch {
     // Debug logging should never break user flows.
   }
+}
+
+async function writeConfluenceScanDebugLog(
+  mode: ConfluenceScanDebugReport["mode"],
+  seed: { spaceKey: string; spaceUrl: string },
+  payload: { scanned: number; skipped: number; failures: ConfluenceScanResult["failures"] }
+): Promise<void> {
+  await writeDebugLog({
+    kind: "confluence-scan",
+    tabUrl: seed.spaceUrl,
+    report: {
+      mode,
+      spaceKey: seed.spaceKey,
+      spaceUrl: seed.spaceUrl,
+      scanned: payload.scanned,
+      skipped: payload.skipped,
+      failed: payload.failures.length,
+      failureSamples: payload.failures.slice(0, 10).map((failure) => ({
+        url: failure.url,
+        code: failure.error.code,
+        message: failure.error.message,
+      })),
+    },
+  })
 }
 
 async function downloadMarkdown(filename: string, content: string): Promise<boolean> {
@@ -1173,7 +1519,9 @@ function extractConfluenceSpaceKey(url: string): string | null {
 
 function normalizeSpaceKey(value: string): string {
   const cleaned = value.trim().replace(/\s+/g, "")
-  return cleaned ? cleaned.toUpperCase() : "SPACE"
+  if (!cleaned) return "SPACE"
+  if (cleaned.startsWith("~")) return cleaned
+  return cleaned.toUpperCase()
 }
 
 function buildPageNodeId(url: string): string {
@@ -1292,7 +1640,7 @@ async function resolveConfluenceSeed(input: string): Promise<{ spaceUrl: string;
   }
 
   const key = input.trim().replace(/\s+/g, "")
-  if (!/^[a-z0-9._-]{2,64}$/i.test(key)) {
+  if (!/^[~a-z0-9._-]{1,128}$/i.test(key)) {
     throw new Error("Use full Space URL or a valid Space key")
   }
 
@@ -1306,6 +1654,458 @@ async function resolveConfluenceSeed(input: string): Promise<{ spaceUrl: string;
     origin,
     spaceKey,
     spaceUrl: `${origin}/wiki/spaces/${encodeURIComponent(spaceKey)}`,
+  }
+}
+
+interface ConfluenceApiPageRecord {
+  sourceId: string
+  title: string
+  url: string
+  parentSourceId?: string
+}
+
+function buildConfluenceNodeIdFromSourceId(sourceId: string): string {
+  return `cf-page-${sourceId}`
+}
+
+function resolveConfluenceApiUrl(pathOrUrl: string, origin: string, baseHint?: string): string | null {
+  if (!pathOrUrl) return null
+  try {
+    const trimmed = pathOrUrl.trim()
+    if (!trimmed) return null
+    if (/^https?:\/\//i.test(trimmed)) {
+      return cleanConfluenceUrl(new URL(trimmed).toString())
+    }
+
+    if (baseHint) {
+      try {
+        const baseForRelative = baseHint.endsWith("/") ? baseHint : `${baseHint}/`
+        return cleanConfluenceUrl(new URL(trimmed, baseForRelative).toString())
+      } catch {
+        // Fallback to manual path handling below.
+      }
+    }
+
+    const normalized = trimmed.startsWith("/") ? trimmed : `/${trimmed}`
+    if (normalized.startsWith("/wiki/")) {
+      return cleanConfluenceUrl(new URL(normalized, origin).toString())
+    }
+    if (
+      normalized.startsWith("/rest/") ||
+      normalized.startsWith("/api/") ||
+      normalized.startsWith("/spaces/") ||
+      normalized.startsWith("/display/")
+    ) {
+      return cleanConfluenceUrl(new URL(`/wiki${normalized}`, origin).toString())
+    }
+    return cleanConfluenceUrl(new URL(normalized, `${origin}/wiki`).toString())
+  } catch {
+    return null
+  }
+}
+
+async function confluenceApiFetchJsonInTab(
+  tabId: number,
+  requestUrl: string
+): Promise<{ ok: boolean; status: number; json: unknown; errorMessage?: string }> {
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: async (url: string) => {
+      try {
+        const response = await fetch(url, {
+          credentials: "include",
+          headers: { Accept: "application/json" },
+        })
+        const text = await response.text()
+        let parsed: unknown = null
+        if (text) {
+          try {
+            parsed = JSON.parse(text)
+          } catch {
+            parsed = null
+          }
+        }
+
+        return {
+          ok: response.ok,
+          status: response.status,
+          json: parsed,
+          errorMessage: response.ok
+            ? ""
+            : typeof (parsed as { message?: unknown } | null)?.message === "string"
+              ? String((parsed as { message: string }).message)
+              : text.slice(0, 240),
+        }
+      } catch (error) {
+        return {
+          ok: false,
+          status: 0,
+          json: null,
+          errorMessage: error instanceof Error ? error.message : String(error),
+        }
+      }
+    },
+    args: [requestUrl],
+  })
+
+  const payload = result as { ok?: boolean; status?: number; json?: unknown; errorMessage?: string } | undefined
+  return {
+    ok: !!payload?.ok,
+    status: Number(payload?.status ?? 0),
+    json: payload?.json ?? null,
+    errorMessage: payload?.errorMessage || undefined,
+  }
+}
+
+function buildConfluenceNodesFromApiRecords(
+  records: Map<string, ConfluenceApiPageRecord>,
+  maxDepth: number
+): { pages: ConfluencePageNode[]; skipped: number } {
+  const depthCache = new Map<string, number>()
+  const titleBreadcrumbCache = new Map<string, string[]>()
+
+  const resolveDepth = (sourceId: string, stack = new Set<string>()): number => {
+    const cached = depthCache.get(sourceId)
+    if (typeof cached === "number") return cached
+
+    const node = records.get(sourceId)
+    if (!node?.parentSourceId || !records.has(node.parentSourceId)) {
+      depthCache.set(sourceId, 0)
+      return 0
+    }
+    if (stack.has(sourceId)) {
+      depthCache.set(sourceId, 0)
+      return 0
+    }
+
+    stack.add(sourceId)
+    const depth = resolveDepth(node.parentSourceId, stack) + 1
+    stack.delete(sourceId)
+    depthCache.set(sourceId, depth)
+    return depth
+  }
+
+  const resolveBreadcrumbs = (sourceId: string): string[] => {
+    const cached = titleBreadcrumbCache.get(sourceId)
+    if (cached) return cached
+
+    const chain: string[] = []
+    let current = records.get(sourceId)
+    const seen = new Set<string>()
+
+    while (current?.parentSourceId) {
+      const parent = records.get(current.parentSourceId)
+      if (!parent || seen.has(parent.sourceId)) break
+      chain.unshift(parent.title)
+      seen.add(parent.sourceId)
+      current = parent
+    }
+
+    titleBreadcrumbCache.set(sourceId, chain)
+    return chain
+  }
+
+  const pages: ConfluencePageNode[] = []
+  let skipped = 0
+
+  const ordered = Array.from(records.values()).sort((a, b) => {
+    const depthA = resolveDepth(a.sourceId)
+    const depthB = resolveDepth(b.sourceId)
+    if (depthA !== depthB) return depthA - depthB
+    return a.title.localeCompare(b.title)
+  })
+
+  for (const item of ordered) {
+    const depth = resolveDepth(item.sourceId)
+    if (depth > maxDepth) {
+      skipped += 1
+      continue
+    }
+
+    const parentId = item.parentSourceId && records.has(item.parentSourceId)
+      ? buildConfluenceNodeIdFromSourceId(item.parentSourceId)
+      : undefined
+
+    pages.push({
+      id: buildConfluenceNodeIdFromSourceId(item.sourceId),
+      url: item.url,
+      title: item.title,
+      breadcrumbs: resolveBreadcrumbs(item.sourceId),
+      depth,
+      parentId,
+    })
+  }
+
+  return { pages, skipped }
+}
+
+async function scanConfluenceSpaceViaApiV2(
+  tabId: number,
+  seed: { spaceUrl: string; origin: string; spaceKey: string },
+  options: { maxPages: number; maxDepth: number }
+): Promise<{ pages: ConfluencePageNode[]; skipped: number }> {
+  const spacesUrl = `${seed.origin}/wiki/api/v2/spaces?keys=${encodeURIComponent(seed.spaceKey)}&limit=10`
+  const spacesResponse = await confluenceApiFetchJsonInTab(tabId, spacesUrl)
+  if (!spacesResponse.ok) {
+    throw new Error(
+      `Confluence API v2 spaces request failed (${spacesResponse.status}): ${spacesResponse.errorMessage || "unknown error"}`
+    )
+  }
+
+  const spacesPayload = spacesResponse.json as
+    | { results?: Array<{ id?: unknown; key?: unknown }>; _links?: { base?: string } }
+    | null
+    | undefined
+  const spaces = Array.isArray(spacesPayload?.results) ? spacesPayload.results : []
+  const space = spaces.find(
+    (item) => normalizeSpaceKey(String(item?.key ?? "")) === normalizeSpaceKey(seed.spaceKey)
+  ) || spaces[0]
+
+  const spaceId = String(space?.id ?? "").trim()
+  if (!spaceId) {
+    throw new Error(`Confluence API v2 cannot resolve space id for key "${seed.spaceKey}"`)
+  }
+
+  const records = new Map<string, ConfluenceApiPageRecord>()
+  let skipped = 0
+  let nextUrl: string | null =
+    `${seed.origin}/wiki/api/v2/pages?space-id=${encodeURIComponent(spaceId)}&status=current&limit=${CONFLUENCE_API_PAGE_LIMIT}`
+
+  while (nextUrl && records.size < options.maxPages) {
+    throwIfConfluenceCancelled()
+    await waitIfConfluencePaused()
+
+    const response = await confluenceApiFetchJsonInTab(tabId, nextUrl)
+    if (!response.ok) {
+      throw new Error(
+        `Confluence API v2 pages request failed (${response.status}): ${response.errorMessage || "unknown error"}`
+      )
+    }
+
+    const payload = response.json as
+      | {
+          results?: Array<{
+            id?: unknown
+            title?: unknown
+            parentId?: unknown
+            _links?: { webui?: unknown }
+          }>
+          _links?: { next?: unknown; base?: string }
+        }
+      | null
+      | undefined
+    const items = Array.isArray(payload?.results) ? payload.results : []
+
+    for (const item of items) {
+      const sourceId = String(item?.id ?? "").trim()
+      if (!sourceId) {
+        skipped += 1
+        continue
+      }
+
+      if (records.has(sourceId)) {
+        skipped += 1
+        continue
+      }
+      if (records.size >= options.maxPages) {
+        skipped += 1
+        continue
+      }
+
+      const webui = typeof item?._links?.webui === "string" ? item._links.webui : ""
+      const fallbackUrl = `${seed.origin}/wiki/spaces/${encodeURIComponent(seed.spaceKey)}/pages/${encodeURIComponent(sourceId)}`
+      const pageUrl = resolveConfluenceApiUrl(webui, seed.origin, payload?._links?.base) || fallbackUrl
+
+      records.set(sourceId, {
+        sourceId,
+        title: String(item?.title ?? sourceId).trim() || sourceId,
+        url: pageUrl,
+        parentSourceId: item?.parentId ? String(item.parentId) : undefined,
+      })
+    }
+
+    nextUrl = resolveConfluenceApiUrl(
+      typeof payload?._links?.next === "string" ? payload._links.next : "",
+      seed.origin,
+      payload?._links?.base
+    )
+
+    updateConfluenceProgress({
+      stage: "scan",
+      status: confluenceJobState.paused ? "paused" : "running",
+      spaceKey: seed.spaceKey,
+      spaceUrl: seed.spaceUrl,
+      processed: records.size,
+      total: Math.min(options.maxPages, records.size + (nextUrl ? CONFLUENCE_API_PAGE_LIMIT : 0)),
+      queued: nextUrl ? 1 : 0,
+      scanned: records.size,
+      exported: 0,
+      skipped,
+      failed: 0,
+      currentUrl: nextUrl || undefined,
+    })
+  }
+
+  const built = buildConfluenceNodesFromApiRecords(records, options.maxDepth)
+  return { pages: built.pages, skipped: skipped + built.skipped }
+}
+
+async function scanConfluenceSpaceViaApiV1(
+  tabId: number,
+  seed: { spaceUrl: string; origin: string; spaceKey: string },
+  options: { maxPages: number; maxDepth: number }
+): Promise<{ pages: ConfluencePageNode[]; skipped: number }> {
+  const cql = `space="${seed.spaceKey}" and type=page and status=current`
+  let nextUrl: string | null =
+    `${seed.origin}/wiki/rest/api/content/search?cql=${encodeURIComponent(cql)}&limit=${CONFLUENCE_API_V1_PAGE_LIMIT}&expand=ancestors`
+
+  const records = new Map<string, ConfluenceApiPageRecord>()
+  let skipped = 0
+
+  while (nextUrl && records.size < options.maxPages) {
+    throwIfConfluenceCancelled()
+    await waitIfConfluencePaused()
+
+    const response = await confluenceApiFetchJsonInTab(tabId, nextUrl)
+    if (!response.ok) {
+      throw new Error(
+        `Confluence API v1 content search failed (${response.status}): ${response.errorMessage || "unknown error"}`
+      )
+    }
+
+    const payload = response.json as
+      | {
+          results?: Array<{
+            id?: unknown
+            title?: unknown
+            ancestors?: Array<{ id?: unknown; title?: unknown }>
+            _links?: { webui?: unknown }
+            content?: {
+              id?: unknown
+              title?: unknown
+              ancestors?: Array<{ id?: unknown; title?: unknown }>
+              _links?: { webui?: unknown }
+            }
+          }>
+          _links?: { next?: unknown; base?: string }
+        }
+      | null
+      | undefined
+    const items = Array.isArray(payload?.results) ? payload.results : []
+
+    for (const item of items) {
+      const content = item?.content && typeof item.content === "object" ? item.content : item
+      const sourceId = String(content?.id ?? "").trim()
+      if (!sourceId) {
+        skipped += 1
+        continue
+      }
+      if (records.has(sourceId)) {
+        skipped += 1
+        continue
+      }
+      if (records.size >= options.maxPages) {
+        skipped += 1
+        continue
+      }
+
+      const ancestors = Array.isArray(content?.ancestors) ? content.ancestors : []
+      const parentSourceId = ancestors.length > 0 ? String(ancestors[ancestors.length - 1]?.id ?? "").trim() : ""
+
+      const webui = typeof content?._links?.webui === "string" ? content._links.webui : ""
+      const fallbackUrl = `${seed.origin}/wiki/spaces/${encodeURIComponent(seed.spaceKey)}/pages/${encodeURIComponent(sourceId)}`
+      const pageUrl = resolveConfluenceApiUrl(webui, seed.origin, payload?._links?.base) || fallbackUrl
+
+      records.set(sourceId, {
+        sourceId,
+        title: String(content?.title ?? sourceId).trim() || sourceId,
+        url: pageUrl,
+        parentSourceId: parentSourceId || undefined,
+      })
+    }
+
+    nextUrl = resolveConfluenceApiUrl(
+      typeof payload?._links?.next === "string" ? payload._links.next : "",
+      seed.origin,
+      payload?._links?.base
+    )
+
+    updateConfluenceProgress({
+      stage: "scan",
+      status: confluenceJobState.paused ? "paused" : "running",
+      spaceKey: seed.spaceKey,
+      spaceUrl: seed.spaceUrl,
+      processed: records.size,
+      total: Math.min(options.maxPages, records.size + (nextUrl ? CONFLUENCE_API_V1_PAGE_LIMIT : 0)),
+      queued: nextUrl ? 1 : 0,
+      scanned: records.size,
+      exported: 0,
+      skipped,
+      failed: 0,
+      currentUrl: nextUrl || undefined,
+    })
+  }
+
+  const built = buildConfluenceNodesFromApiRecords(records, options.maxDepth)
+  return { pages: built.pages, skipped: skipped + built.skipped }
+}
+
+async function scanConfluenceSpaceViaApi(
+  seed: { spaceUrl: string; origin: string; spaceKey: string },
+  options: { maxPages: number; maxDepth: number }
+): Promise<{
+  pages: ConfluencePageNode[]
+  skipped: number
+  failures: ConfluenceScanResult["failures"]
+  mode: "api-v2" | "api-v1" | "none"
+}> {
+  const failures: ConfluenceScanResult["failures"] = []
+  let tabId: number | undefined
+
+  try {
+    tabId = await openHiddenTab(seed.spaceUrl)
+
+    try {
+      const v2 = await withConfluenceRetry(() => scanConfluenceSpaceViaApiV2(tabId!, seed, options))
+      if (v2.pages.length > 0) {
+        return { pages: v2.pages, skipped: v2.skipped, failures, mode: "api-v2" }
+      }
+      failures.push({
+        url: seed.spaceUrl,
+        error: toError("confluence-scan-failed", "Confluence API v2 returned no pages"),
+      })
+    } catch (error) {
+      failures.push({
+        url: seed.spaceUrl,
+        error: toError(
+          "confluence-scan-failed",
+          error instanceof Error ? `[API v2] ${error.message}` : "[API v2] Confluence scan failed"
+        ),
+      })
+    }
+
+    try {
+      const v1 = await withConfluenceRetry(() => scanConfluenceSpaceViaApiV1(tabId!, seed, options))
+      if (v1.pages.length > 0) {
+        return { pages: v1.pages, skipped: v1.skipped, failures, mode: "api-v1" }
+      }
+      failures.push({
+        url: seed.spaceUrl,
+        error: toError("confluence-scan-failed", "Confluence API v1 returned no pages"),
+      })
+    } catch (error) {
+      failures.push({
+        url: seed.spaceUrl,
+        error: toError(
+          "confluence-scan-failed",
+          error instanceof Error ? `[API v1] ${error.message}` : "[API v1] Confluence scan failed"
+        ),
+      })
+    }
+
+    return { pages: [], skipped: 0, failures, mode: "none" }
+  } finally {
+    await closeTabSafe(tabId)
   }
 }
 
@@ -1406,6 +2206,27 @@ async function scanConfluenceSpace(
   options: { maxPages: number; maxDepth: number }
 ): Promise<ConfluenceScanResult> {
   const seed = await resolveConfluenceSeed(input)
+  const apiScan = await scanConfluenceSpaceViaApi(seed, options)
+  if (apiScan.pages.length > 0) {
+    const result: ConfluenceScanResult = {
+      spaceKey: seed.spaceKey,
+      spaceUrl: seed.spaceUrl,
+      pages: apiScan.pages,
+      scanned: apiScan.pages.length,
+      skipped: apiScan.skipped,
+      failed: 0,
+      failures: [],
+      generatedAt: new Date().toISOString(),
+    }
+    await writeConfluenceScanDebugLog(apiScan.mode === "api-v1" ? "api-v1" : "api-v2", seed, {
+      scanned: result.scanned,
+      skipped: result.skipped,
+      failures: [],
+    })
+    return result
+  }
+
+  const apiFailures = apiScan.failures
   const queue: Array<{ url: string; depth: number; parentUrl?: string }> = [{ url: seed.spaceUrl, depth: 0 }]
   const queued = new Set([seed.spaceUrl])
   const visited = new Set<string>()
@@ -1424,9 +2245,37 @@ async function scanConfluenceSpace(
     if (!current) break
     queued.delete(current.url)
 
+    updateConfluenceProgress({
+      stage: "scan",
+      status: confluenceJobState.paused ? "paused" : "running",
+      spaceKey: seed.spaceKey,
+      spaceUrl: seed.spaceUrl,
+      processed: pages.size + failures.length,
+      total: Math.min(options.maxPages, pages.size + failures.length + queue.length + 1),
+      queued: queue.length + 1,
+      scanned: pages.size,
+      exported: 0,
+      skipped,
+      failed: failures.length,
+      currentUrl: current.url,
+    })
+
     const normalizedCurrent = cleanConfluenceUrl(current.url)
     if (visited.has(normalizedCurrent)) {
       skipped += 1
+      updateConfluenceProgress({
+        stage: "scan",
+        status: "running",
+        spaceKey: seed.spaceKey,
+        spaceUrl: seed.spaceUrl,
+        processed: pages.size + failures.length,
+        total: Math.min(options.maxPages, pages.size + failures.length + queue.length),
+        queued: queue.length,
+        scanned: pages.size,
+        exported: 0,
+        skipped,
+        failed: failures.length,
+      })
       continue
     }
     visited.add(normalizedCurrent)
@@ -1478,6 +2327,22 @@ async function scanConfluenceSpace(
         queue.push({ url: nextUrl, depth: current.depth + 1, parentUrl: pageUrl })
         queued.add(nextUrl)
       }
+
+      updateConfluenceProgress({
+        stage: "scan",
+        status: "running",
+        spaceKey: seed.spaceKey,
+        spaceUrl: seed.spaceUrl,
+        processed: pages.size + failures.length,
+        total: Math.min(options.maxPages, pages.size + failures.length + queue.length),
+        queued: queue.length,
+        scanned: pages.size,
+        exported: 0,
+        skipped,
+        failed: failures.length,
+        currentUrl: pageUrl,
+        currentTitle: snapshot.title || pageUrl,
+      })
     } catch (error) {
       failures.push({
         url: normalizedCurrent,
@@ -1486,19 +2351,42 @@ async function scanConfluenceSpace(
           error instanceof Error ? error.message : "Failed to scan page"
         ),
       })
+
+      updateConfluenceProgress({
+        stage: "scan",
+        status: "running",
+        spaceKey: seed.spaceKey,
+        spaceUrl: seed.spaceUrl,
+        processed: pages.size + failures.length,
+        total: Math.min(options.maxPages, pages.size + failures.length + queue.length),
+        queued: queue.length,
+        scanned: pages.size,
+        exported: 0,
+        skipped,
+        failed: failures.length,
+        currentUrl: normalizedCurrent,
+        message: error instanceof Error ? error.message : "Failed to scan page",
+      })
     }
   }
 
-  return {
+  const finalFailures = pages.size > 0 ? failures : [...apiFailures, ...failures]
+  const result: ConfluenceScanResult = {
     spaceKey: seed.spaceKey,
     spaceUrl: seed.spaceUrl,
     pages: Array.from(pages.values()),
     scanned: pages.size,
     skipped,
-    failed: failures.length,
-    failures,
+    failed: finalFailures.length,
+    failures: finalFailures,
     generatedAt: new Date().toISOString(),
   }
+  await writeConfluenceScanDebugLog("dom-fallback", seed, {
+    scanned: result.scanned,
+    skipped: result.skipped,
+    failures: result.failures,
+  })
+  return result
 }
 
 function ensureUniqueConfluenceMarkdownPath(initialPath: string, usedPaths: Set<string>): string {
@@ -1684,11 +2572,80 @@ async function fetchAttachmentsInTab(
   }>
 }
 
-function rewriteAttachmentUrls(markdown: string, rewrites: Array<{ sourceUrl: string; localUrl: string }>): string {
-  let updated = markdown
-  for (const rule of rewrites) {
-    updated = updated.split(rule.sourceUrl).join(rule.localUrl)
+function normalizeComparableAttachmentUrl(value: string): string {
+  try {
+    return cleanConfluenceUrl(new URL(value).toString())
+  } catch {
+    return value.trim()
   }
+}
+
+function splitMarkdownLinkTarget(target: string): { urlPart: string; suffix: string; wrapped: boolean } | null {
+  const body = target.trim()
+  if (!body) return null
+
+  if (body.startsWith("<")) {
+    const closeIndex = body.indexOf(">")
+    if (closeIndex > 1) {
+      return {
+        urlPart: body.slice(1, closeIndex),
+        suffix: body.slice(closeIndex + 1),
+        wrapped: true,
+      }
+    }
+  }
+
+  const match = body.match(/^(\S+)([\s\S]*)$/)
+  if (!match) return null
+  return {
+    urlPart: match[1],
+    suffix: match[2],
+    wrapped: false,
+  }
+}
+
+function resolveAttachmentRewriteUrl(urlPart: string, rewriteMap: Map<string, string>): string | null {
+  const direct = rewriteMap.get(urlPart) || rewriteMap.get(normalizeComparableAttachmentUrl(urlPart))
+  if (direct) return direct
+  try {
+    const decoded = decodeURIComponent(urlPart)
+    if (decoded !== urlPart) {
+      return rewriteMap.get(decoded) || rewriteMap.get(normalizeComparableAttachmentUrl(decoded)) || null
+    }
+  } catch {
+    // Ignore malformed uri components.
+  }
+  return null
+}
+
+function rewriteAttachmentUrls(markdown: string, rewrites: Array<{ sourceUrl: string; localUrl: string }>): string {
+  if (!markdown || rewrites.length === 0) return markdown
+
+  const rewriteMap = new Map<string, string>()
+  for (const rule of rewrites) {
+    rewriteMap.set(rule.sourceUrl, rule.localUrl)
+    rewriteMap.set(normalizeComparableAttachmentUrl(rule.sourceUrl), rule.localUrl)
+  }
+
+  let updated = markdown.replace(/(!?\[[^\]]*]\()([^)]+)(\))/g, (full, prefix, target, suffix) => {
+    const parts = splitMarkdownLinkTarget(String(target))
+    if (!parts) return full
+    const replacement = resolveAttachmentRewriteUrl(parts.urlPart, rewriteMap)
+    if (!replacement) return full
+
+    const nextTarget = parts.wrapped
+      ? `<${replacement}>${parts.suffix}`
+      : `${replacement}${parts.suffix}`
+    return `${prefix}${nextTarget}${suffix}`
+  })
+
+  // Also rewrite markdown reference-style targets: [id]: https://...
+  updated = updated.replace(/^(\[[^\]]+]:\s*)(\S+)(.*)$/gm, (full, prefix, target, suffix) => {
+    const replacement = resolveAttachmentRewriteUrl(String(target), rewriteMap)
+    if (!replacement) return full
+    return `${prefix}${replacement}${suffix}`
+  })
+
   return updated
 }
 
@@ -1860,15 +2817,38 @@ async function exportConfluencePageOnce(page: ConfluencePageNode, pagePath: stri
 
 async function exportConfluenceSpace(
   scan: ConfluenceScanResult,
-  options: { resume: boolean }
+  options: { resume: boolean; selectedPageIds?: Set<string> }
 ): Promise<ConfluenceExportResult> {
-  const checkpoint = await prepareConfluenceCheckpoint(scan, options.resume)
-  const pagesById = new Map<string, ConfluenceExportPageResult>(checkpoint.pages.map((page) => [page.pageId, page]))
-  let attachments = checkpoint.attachments.slice()
+  const selectedIds = options.selectedPageIds
+  const targetPages = selectedIds ? scan.pages.filter((page) => selectedIds.has(page.id)) : scan.pages
+  if (targetPages.length === 0) {
+    throw new Error("No pages selected for export")
+  }
+
+  const exportScan: ConfluenceScanResult =
+    targetPages.length === scan.pages.length
+      ? scan
+      : {
+          ...scan,
+          pages: targetPages,
+          scanned: targetPages.length,
+          skipped: 0,
+          failed: 0,
+          failures: [],
+        }
+
+  const checkpoint = await prepareConfluenceCheckpoint(exportScan, options.resume)
+  const targetPageIdSet = new Set(targetPages.map((page) => page.id))
+  const pagesById = new Map<string, ConfluenceExportPageResult>(
+    checkpoint.pages
+      .filter((page) => targetPageIdSet.has(page.pageId))
+      .map((page) => [page.pageId, page])
+  )
+  let attachments = checkpoint.attachments.filter((item) => targetPageIdSet.has(item.pageId))
   const seenPageUrls = new Set<string>()
   const pagePathById = buildConfluencePagePathMap(scan.pages)
 
-  for (const page of scan.pages) {
+  for (const page of targetPages) {
     const existing = pagesById.get(page.id)
     if (existing) {
       existing.path = resolveConfluencePagePath(page, pagePathById)
@@ -1885,9 +2865,26 @@ async function exportConfluenceSpace(
     }
   }
 
-  for (let index = 0; index < scan.pages.length; index++) {
-    const page = scan.pages[index]
+  for (let index = 0; index < targetPages.length; index++) {
+    const page = targetPages[index]
     const pagePath = resolveConfluencePagePath(page, pagePathById)
+
+    updateConfluenceProgress({
+      stage: "export",
+      status: confluenceJobState.paused ? "paused" : "running",
+      spaceKey: scan.spaceKey,
+      spaceUrl: scan.spaceUrl,
+      processed: index,
+      total: targetPages.length,
+      queued: Math.max(0, targetPages.length - index),
+      scanned: scan.scanned,
+      exported: pagesById.size > 0 ? Array.from(pagesById.values()).filter((item) => item.status === "exported").length : 0,
+      skipped: pagesById.size > 0 ? Array.from(pagesById.values()).filter((item) => item.status === "skipped").length : 0,
+      failed: pagesById.size > 0 ? Array.from(pagesById.values()).filter((item) => item.status === "failed").length : 0,
+      currentUrl: page.url,
+      currentTitle: page.title,
+    })
+
     throwIfConfluenceCancelled()
     await waitIfConfluencePaused()
     await applyConfluenceRateLimit(index)
@@ -1900,10 +2897,25 @@ async function exportConfluenceSpace(
     const normalizedPageUrl = cleanConfluenceUrl(page.url)
     if (seenPageUrls.has(normalizedPageUrl)) {
       pagesById.set(page.id, buildSkippedPageResult(page, "duplicate", undefined, pagePath))
-      checkpoint.pages = withCheckpointPageOrder(scan, pagesById)
+      checkpoint.pages = withCheckpointPageOrder(exportScan, pagesById)
       checkpoint.nextPageIndex = index + 1
       checkpoint.updatedAt = new Date().toISOString()
       await saveConfluenceCheckpoint(checkpoint)
+      updateConfluenceProgress({
+        stage: "export",
+        status: "running",
+        spaceKey: scan.spaceKey,
+        spaceUrl: scan.spaceUrl,
+        processed: index + 1,
+        total: targetPages.length,
+        queued: Math.max(0, targetPages.length - (index + 1)),
+        scanned: scan.scanned,
+        exported: Array.from(pagesById.values()).filter((item) => item.status === "exported").length,
+        skipped: Array.from(pagesById.values()).filter((item) => item.status === "skipped").length,
+        failed: Array.from(pagesById.values()).filter((item) => item.status === "failed").length,
+        currentUrl: page.url,
+        currentTitle: page.title,
+      })
       continue
     }
     seenPageUrls.add(normalizedPageUrl)
@@ -1926,14 +2938,30 @@ async function exportConfluenceSpace(
       )
     }
 
-    checkpoint.pages = withCheckpointPageOrder(scan, pagesById)
+    checkpoint.pages = withCheckpointPageOrder(exportScan, pagesById)
     checkpoint.attachments = attachments
     checkpoint.nextPageIndex = index + 1
     checkpoint.updatedAt = new Date().toISOString()
     await saveConfluenceCheckpoint(checkpoint)
+
+    updateConfluenceProgress({
+      stage: "export",
+      status: "running",
+      spaceKey: scan.spaceKey,
+      spaceUrl: scan.spaceUrl,
+      processed: index + 1,
+      total: targetPages.length,
+      queued: Math.max(0, targetPages.length - (index + 1)),
+      scanned: scan.scanned,
+      exported: Array.from(pagesById.values()).filter((item) => item.status === "exported").length,
+      skipped: Array.from(pagesById.values()).filter((item) => item.status === "skipped").length,
+      failed: Array.from(pagesById.values()).filter((item) => item.status === "failed").length,
+      currentUrl: page.url,
+      currentTitle: page.title,
+    })
   }
 
-  const finalPages = withCheckpointPageOrder(scan, pagesById)
+  const finalPages = withCheckpointPageOrder(exportScan, pagesById)
   const finalResult: ConfluenceExportResult = {
     spaceKey: scan.spaceKey,
     spaceUrl: scan.spaceUrl,
@@ -1945,12 +2973,12 @@ async function exportConfluenceSpace(
     generatedAt: new Date().toISOString(),
   }
 
-  checkpoint.scan = scan
+  checkpoint.scan = exportScan
   checkpoint.pages = finalPages
   checkpoint.attachments = attachments
   checkpoint.completed = true
-  checkpoint.nextPageIndex = scan.pages.length
-  checkpoint.totalPages = scan.pages.length
+  checkpoint.nextPageIndex = targetPages.length
+  checkpoint.totalPages = targetPages.length
   checkpoint.updatedAt = new Date().toISOString()
   await saveConfluenceCheckpoint(checkpoint)
 

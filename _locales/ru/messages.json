@@ -12,6 +12,7 @@
   "btnExportAll": { "message": "Экспортировать все вкладки" },
   "btnExportZip": { "message": "Скачать .zip" },
   "btnClearHistory": { "message": "Очистить историю" },
+  "btnOpenConfluenceExport": { "message": "Открыть Confluence Export" },
 
   "labelPreview": { "message": "Предпросмотр" },
   "labelHistory": { "message": "История" },
@@ -30,8 +31,34 @@
   "labelScanned": { "message": "просканировано" },
   "labelSkipped": { "message": "пропущено" },
   "labelFailed": { "message": "ошибок" },
+  "labelSelectedPages": {
+    "message": "выбрано $1/$2",
+    "placeholders": {
+      "1": { "content": "$1" },
+      "2": { "content": "$2" }
+    }
+  },
   "labelExported": { "message": "экспортировано" },
   "labelAttachments": { "message": "вложений" },
+  "labelProgress": { "message": "прогресс" },
+  "labelProcessed": { "message": "обработано" },
+  "labelQueued": { "message": "в очереди" },
+  "labelCurrent": { "message": "текущая страница" },
+  "labelStageScan": { "message": "сканирование" },
+  "labelStageExport": { "message": "экспорт" },
+  "labelStatusRunning": { "message": "в процессе" },
+  "labelStatusPaused": { "message": "на паузе" },
+  "labelStatusCompleted": { "message": "завершено" },
+  "labelStatusCancelled": { "message": "отменено" },
+  "labelStatusFailed": { "message": "ошибка" },
+  "labelScanFailureDetails": {
+    "message": "ошибки сканирования: $1",
+    "placeholders": { "1": { "content": "$1" } }
+  },
+  "labelScanFailureMore": {
+    "message": "и ещё $1...",
+    "placeholders": { "1": { "content": "$1" } }
+  },
 
   "modeArticle": { "message": "Статья" },
   "modeFull": { "message": "Вся страница" },
@@ -62,6 +89,8 @@
   "toastNoCodeBlocks": { "message": "На странице не найдено блоков кода" },
   "toastNoTables": { "message": "На странице не найдено таблиц" },
   "toastBatchPartial": { "message": "Экспорт завершён, часть вкладок пропущена" },
+  "toastAiOpenedNoClipboard": { "message": "AI открыт, но доступ к буферу обмена заблокирован. Нажмите «Копировать» и вставьте вручную через Ctrl+V." },
+  "toastMdtoolOpenedNoClipboard": { "message": "mdtool.site открыт, но доступ к буферу обмена заблокирован. Сначала нажмите «Копировать»." },
   "toastGrantTabsExport": { "message": "Разрешите доступ к вкладкам для экспорта" },
   "toastConfluenceInvalidInput": { "message": "Введите корректный URL или ключ Confluence Space" },
   "toastConfluenceNoPages": { "message": "В этом Confluence Space страницы не найдены" },
@@ -70,6 +99,7 @@
   "toastConfluenceFailed": { "message": "Ошибка операции Confluence" },
   "toastConfluenceGrantTabsScan": { "message": "Разрешите доступ к вкладкам для сканирования Confluence" },
   "toastConfluenceRunScanFirst": { "message": "Сначала запустите сканирование" },
+  "toastConfluenceSelectAtLeastOnePage": { "message": "Выберите хотя бы одну страницу для экспорта" },
   "toastConfluenceStopping": { "message": "Останавливаем..." },
   "toastConfluenceResumed": { "message": "Продолжено" },
   "toastConfluencePaused": { "message": "Пауза" },
@@ -95,6 +125,8 @@
     }
   },
   "toastConfluenceExportComplete": { "message": "Экспорт Confluence завершен" },
+  "toastConfluencePrefilled": { "message": "Поле Confluence Export автоматически заполнено по текущей странице" },
+  "toastConfluencePanelOpened": { "message": "Confluence Export открыт в боковой панели" },
 
   "ctxSavePage": { "message": "Сохранить страницу как Markdown" },
   "ctxCopyMd": { "message": "Копировать как Markdown" },
@@ -116,6 +148,7 @@
   "confluenceIntro": { "message": "Введите URL или ключ Confluence Space, затем просканируйте страницы и экспортируйте zip." },
   "confluenceInputPlaceholder": { "message": "https://your-domain.atlassian.net/wiki/spaces/SPACE" },
   "confluenceNoPagesYet": { "message": "Просканированных страниц пока нет." },
+  "popupConfluenceDetected": { "message": "Обнаружена страница Confluence" },
   "customPromptPlaceholder": { "message": "Введите промпт…" },
   "customAiUrl": { "message": "URL своего AI" },
   "customAiUrlPlaceholder": { "message": "https://…" },
@@ -128,6 +161,8 @@
   "btnStop": { "message": "Стоп" },
   "btnLoad": { "message": "Загрузить" },
   "btnClear": { "message": "Очистить" },
+  "btnSelectAll": { "message": "Выбрать все" },
+  "btnSelectNone": { "message": "Снять выбор" },
 
   "settingsDefaultAi": { "message": "AI по умолчанию" },
   "settingsDefaultPrompt": { "message": "Промпт по умолчанию" },

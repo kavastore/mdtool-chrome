@@ -69,10 +69,24 @@ export interface ExtractionOperationReport {
 export interface DebugLogEntry {
   id: string
   createdAt: string
-  kind: "extract" | "batch"
+  kind: "extract" | "batch" | "confluence-scan"
   tabId?: number
   tabUrl?: string
-  report: ExtractionOperationReport
+  report: ExtractionOperationReport | ConfluenceScanDebugReport
+}
+
+export interface ConfluenceScanDebugReport {
+  mode: "api-v2" | "api-v1" | "dom-fallback"
+  spaceKey: string
+  spaceUrl: string
+  scanned: number
+  skipped: number
+  failed: number
+  failureSamples: Array<{
+    url: string
+    code: ExtractionErrorCode
+    message: string
+  }>
 }
 
 export interface BatchExportFailure {
@@ -161,6 +175,27 @@ export interface ConfluenceCheckpoint {
   totalPages: number
   completed: boolean
   createdAt: string
+  updatedAt: string
+}
+
+export type ConfluenceProgressStage = "scan" | "export"
+export type ConfluenceProgressStatus = "started" | "running" | "paused" | "completed" | "cancelled" | "failed"
+
+export interface ConfluenceProgressPayload {
+  stage: ConfluenceProgressStage
+  status: ConfluenceProgressStatus
+  spaceKey: string
+  spaceUrl: string
+  processed: number
+  total: number
+  queued: number
+  scanned: number
+  exported: number
+  skipped: number
+  failed: number
+  currentUrl?: string
+  currentTitle?: string
+  message?: string
   updatedAt: string
 }
 

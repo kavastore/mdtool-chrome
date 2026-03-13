@@ -8,6 +8,7 @@ import type {
   ClipItem,
   ConfluenceCheckpoint,
   ConfluenceExportResult,
+  ConfluenceProgressPayload,
   ConfluenceScanResult,
   ExtractionErrorDetails,
 } from "~lib/types"
@@ -66,6 +67,8 @@ function SidePanel() {
   const [scanResult, setScanResult] = useState<ConfluenceScanResult | null>(null)
   const [exportResult, setExportResult] = useState<ConfluenceExportResult | null>(null)
   const [checkpoint, setCheckpoint] = useState<ConfluenceCheckpoint | null>(null)
+  const [confluenceProgress, setConfluenceProgress] = useState<ConfluenceProgressPayload | null>(null)
+  const [selectedPageIds, setSelectedPageIds] = useState<string[]>([])
 
   useEffect(() => {
     reload()
@@ -75,6 +78,62 @@ function SidePanel() {
     if (mode !== "confluence") return
     void refreshConfluenceCheckpoint()
   }, [mode])
+
+  useEffect(() => {
+    const onRuntimeMessage = (message: Record<string, unknown>) => {
+      if (message?.type !== "CONFLUENCE_PROGRESS") return
+      const payload = (message as { data?: ConfluenceProgressPayload }).data
+      if (!payload) return
+
+      setConfluenceProgress(payload)
+
+      if (payload.stage === "scan") {
+        const active = payload.status === "started" || payload.status === "running" || payload.status === "paused"
+        setScanLoading(active)
+        setConfluencePaused(payload.status === "paused")
+      } else if (payload.stage === "export") {
+        const active = payload.status === "started" || payload.status === "running" || payload.status === "paused"
+        setConfluenceExporting(active)
+        setConfluencePaused(payload.status === "paused")
+      }
+    }
+
+    chrome.runtime.onMessage.addListener(onRuntimeMessage)
+
+    void sendMessage<{ ok?: boolean; data?: ConfluenceProgressPayload | null }>({ type: "CONFLUENCE_PROGRESS_GET" }).then(
+      (res) => {
+        if (res?.ok && res.data) setConfluenceProgress(res.data)
+      }
+    )
+
+    void sendMessage<{ ok?: boolean; data?: { input?: string } | null }>({ type: "CONFLUENCE_UI_PREFILL_CONSUME" }).then(
+      (res) => {
+        const input = res?.ok ? String(res.data?.input || "").trim() : ""
+        if (input) {
+          setMode("confluence")
+          setConfluenceInput((prev) => prev || input)
+          showToast(t("toastConfluencePrefilled"))
+          return
+        }
+
+        void sendMessage<{
+          ok?: boolean
+          data?: { isConfluence?: boolean; confluenceSpaceUrl?: string | null }
+        }>({ type: "GET_ACTIVE_TAB_CONTEXT" }).then((contextRes) => {
+          if (!contextRes?.ok || !contextRes.data?.isConfluence) return
+          const detectedInput = String(contextRes.data.confluenceSpaceUrl || "").trim()
+          setMode("confluence")
+          if (detectedInput) {
+            setConfluenceInput((prev) => prev || detectedInput)
+          }
+        })
+      }
+    )
+
+    return () => {
+      chrome.runtime.onMessage.removeListener(onRuntimeMessage)
+    }
+  }, [])
 
   async function sendMessage<T>(message: Record<string, unknown>): Promise<T | null> {
     try {
@@ -96,6 +155,7 @@ function SidePanel() {
       setCheckpoint(res.data ?? null)
       if (!scanResult && res.data?.scan) {
         setScanResult(res.data.scan)
+        setSelectedPageIds(res.data.scan.pages.map((page) => page.id))
       }
     }
   }
@@ -103,6 +163,24 @@ function SidePanel() {
   function showToast(msg: string) {
     setToast(msg)
     setTimeout(() => setToast(""), 3000)
+  }
+
+  function resolveConfluenceProgressStatusLabel(status: ConfluenceProgressPayload["status"]): string {
+    switch (status) {
+      case "started":
+      case "running":
+        return t("labelStatusRunning")
+      case "paused":
+        return t("labelStatusPaused")
+      case "completed":
+        return t("labelStatusCompleted")
+      case "cancelled":
+        return t("labelStatusCancelled")
+      case "failed":
+        return t("labelStatusFailed")
+      default:
+        return status
+    }
   }
 
   const filtered = clips.filter(
@@ -226,10 +304,12 @@ function SidePanel() {
       if (!res?.ok || !res.data) {
         showToast(resolveExtractionToast(res?.error))
         setScanResult(null)
+        setSelectedPageIds([])
         return
       }
 
       setScanResult(res.data)
+      setSelectedPageIds(res.data.pages.map((page) => page.id))
       await refreshConfluenceCheckpoint()
       if (res.data.pages.length === 0) {
         showToast(t("toastConfluenceScanDoneNoPages"))
@@ -253,6 +333,14 @@ function SidePanel() {
       return
     }
 
+    const selectedFromScan = sourceScan.pages
+      .map((page) => page.id)
+      .filter((id) => selectedPageIds.includes(id))
+    if (selectedFromScan.length === 0) {
+      showToast(t("toastConfluenceSelectAtLeastOnePage"))
+      return
+    }
+
     setConfluenceExporting(true)
     setConfluencePaused(false)
     try {
@@ -264,6 +352,7 @@ function SidePanel() {
         type: "CONFLUENCE_EXPORT",
         scan: sourceScan,
         resume: true,
+        selectedPageIds: selectedFromScan,
       })
 
       if (!res?.ok || !res.data) {
@@ -316,6 +405,7 @@ function SidePanel() {
   async function handleConfluenceUseCheckpoint() {
     if (!checkpoint?.scan) return
     setScanResult(checkpoint.scan)
+    setSelectedPageIds(checkpoint.scan.pages.map((page) => page.id))
     setConfluenceInput(checkpoint.spaceUrl)
     showToast(t("toastConfluenceCheckpointLoaded"))
   }
@@ -324,11 +414,32 @@ function SidePanel() {
     try {
       await sendMessage({ type: "CONFLUENCE_CHECKPOINT_CLEAR" })
       setCheckpoint(null)
+      if (!scanResult) {
+        setSelectedPageIds([])
+      }
       showToast(t("toastConfluenceCheckpointCleared"))
     } catch {
       showToast(t("toastError"))
     }
   }
+
+  function handleSelectAllScannedPages() {
+    const sourceScan = scanResult ?? checkpoint?.scan ?? null
+    if (!sourceScan) return
+    setSelectedPageIds(sourceScan.pages.map((page) => page.id))
+  }
+
+  function handleClearScannedPagesSelection() {
+    setSelectedPageIds([])
+  }
+
+  function handleToggleScannedPage(pageId: string) {
+    setSelectedPageIds((prev) => (prev.includes(pageId) ? prev.filter((id) => id !== pageId) : [...prev, pageId]))
+  }
+
+  const currentScan = scanResult ?? checkpoint?.scan ?? null
+  const scannedPages = currentScan?.pages ?? []
+  const selectedPageCount = scannedPages.filter((page) => selectedPageIds.includes(page.id)).length
 
   async function handleDownloadClip(clip: ClipItem) {
     const filename = `${sanitizeFilename(clip.title) || clip.id}.md`
@@ -473,7 +584,8 @@ function SidePanel() {
               disabled={
                 scanLoading ||
                 confluenceExporting ||
-                !(scanResult?.pages?.length || checkpoint?.scan?.pages?.length)
+                scannedPages.length === 0 ||
+                selectedPageCount === 0
               }
               class="text-xs px-3 py-1.5 rounded bg-emerald-600 text-black font-medium hover:bg-emerald-500 transition-colors disabled:opacity-40"
             >
@@ -494,6 +606,37 @@ function SidePanel() {
               {t("btnStop")}
             </button>
           </div>
+
+          {confluenceProgress && (
+            <div class="rounded border border-zinc-800 bg-zinc-900 p-3">
+              <div class="text-xs text-zinc-300">
+                {t("labelProgress")} ·{" "}
+                {confluenceProgress.stage === "scan" ? t("labelStageScan") : t("labelStageExport")} ·{" "}
+                {resolveConfluenceProgressStatusLabel(confluenceProgress.status)}
+              </div>
+              <div class="mt-1 text-[11px] text-zinc-500">
+                {t("labelProcessed")} {confluenceProgress.processed}/{Math.max(confluenceProgress.total, 1)} ·{" "}
+                {t("labelQueued")} {Math.max(confluenceProgress.queued, 0)}
+              </div>
+              <div class="mt-2 h-1.5 w-full rounded bg-zinc-800 overflow-hidden">
+                <div
+                  class="h-full bg-emerald-500 transition-all"
+                  style={`width: ${Math.max(
+                    2,
+                    Math.min(
+                      100,
+                      Math.round((confluenceProgress.processed / Math.max(confluenceProgress.total, 1)) * 100)
+                    )
+                  )}%`}
+                />
+              </div>
+              {confluenceProgress.currentTitle && (
+                <div class="mt-2 text-[11px] text-zinc-400 truncate">
+                  {t("labelCurrent")}: {confluenceProgress.currentTitle}
+                </div>
+              )}
+            </div>
+          )}
 
           {checkpoint && (
             <div class="rounded border border-zinc-800 bg-zinc-900 p-3 flex items-center justify-between gap-2">
@@ -518,26 +661,78 @@ function SidePanel() {
             </div>
           )}
 
-          {scanResult && (
+          {currentScan && (
             <div class="rounded border border-zinc-800 bg-zinc-900 p-3">
               <div class="text-xs text-zinc-300 mb-2">
-                {t("labelSpace")}: <span class="text-zinc-100">{scanResult.spaceKey}</span>
+                {t("labelSpace")}: <span class="text-zinc-100">{currentScan.spaceKey}</span>
               </div>
               <div class="text-xs text-zinc-500">
-                {t("labelScanned")} {scanResult.scanned} · {t("labelSkipped")} {scanResult.skipped} ·{" "}
-                {t("labelFailed")} {scanResult.failed}
+                {t("labelScanned")} {currentScan.scanned} · {t("labelSkipped")} {currentScan.skipped} ·{" "}
+                {t("labelFailed")} {currentScan.failed}
               </div>
+              <div class="mt-1 text-xs text-zinc-500">
+                {t("labelSelectedPages", [String(selectedPageCount), String(scannedPages.length)])}
+              </div>
+              {currentScan.failures.length > 0 && (
+                <div class="mt-2 rounded border border-amber-900/40 bg-amber-950/20 p-2">
+                  <div class="text-[11px] text-amber-300">
+                    {t("labelScanFailureDetails", String(currentScan.failures.length))}
+                  </div>
+                  <div class="mt-1 space-y-1">
+                    {currentScan.failures.slice(0, 5).map((failure, index) => (
+                      <div key={`${failure.url}-${index}`} class="text-[11px] text-zinc-400">
+                        <div class="truncate text-amber-200">{failure.error.message}</div>
+                        <div class="truncate text-zinc-600">{failure.url}</div>
+                      </div>
+                    ))}
+                    {currentScan.failures.length > 5 && (
+                      <div class="text-[11px] text-zinc-500">
+                        {t("labelScanFailureMore", String(currentScan.failures.length - 5))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
-          {scanResult?.pages?.length ? (
-            <div class="rounded border border-zinc-800 divide-y divide-zinc-800/60 max-h-[340px] overflow-y-auto">
-              {scanResult.pages.map((page) => (
-                <div key={page.id} class="px-3 py-2">
-                  <div class="text-xs text-zinc-200 truncate">{page.title}</div>
-                  <div class="text-[11px] text-zinc-600 truncate">{page.url}</div>
+          {scannedPages.length ? (
+            <div class="rounded border border-zinc-800 bg-zinc-900">
+              <div class="px-3 py-2 border-b border-zinc-800 flex items-center justify-between gap-2">
+                <div class="text-[11px] text-zinc-500">
+                  {t("labelSelectedPages", [String(selectedPageCount), String(scannedPages.length)])}
                 </div>
+                <div class="flex gap-1">
+                  <button
+                    onClick={handleSelectAllScannedPages}
+                    class="text-[11px] px-2 py-1 rounded border border-zinc-700 text-zinc-300 hover:border-zinc-500"
+                  >
+                    {t("btnSelectAll")}
+                  </button>
+                  <button
+                    onClick={handleClearScannedPagesSelection}
+                    class="text-[11px] px-2 py-1 rounded border border-zinc-700 text-zinc-400 hover:text-zinc-200"
+                  >
+                    {t("btnSelectNone")}
+                  </button>
+                </div>
+              </div>
+              <div class="divide-y divide-zinc-800/60 max-h-[340px] overflow-y-auto">
+              {scannedPages.map((page) => (
+                  <label key={page.id} class="px-3 py-2 flex items-start gap-2 cursor-pointer hover:bg-zinc-800/30">
+                    <input
+                      type="checkbox"
+                      checked={selectedPageIds.includes(page.id)}
+                      onChange={() => handleToggleScannedPage(page.id)}
+                      class="mt-0.5 accent-emerald-500"
+                    />
+                    <div class="min-w-0">
+                      <div class="text-xs text-zinc-200 truncate">{page.title}</div>
+                      <div class="text-[11px] text-zinc-600 truncate">{page.url}</div>
+                    </div>
+                  </label>
               ))}
+              </div>
             </div>
           ) : (
             <div class="text-xs text-zinc-600">{t("confluenceNoPagesYet")}</div>
