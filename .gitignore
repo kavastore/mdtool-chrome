@@ -51,3 +51,8 @@ keys.json
 
 # typescript
 *.tsbuildinfo
+
+# local planning docs (keep local, do not commit)
+AUDIT_*.md
+*ROADMAP*.md
+*ANALYSIS*.md
