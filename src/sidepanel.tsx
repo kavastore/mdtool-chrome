@@ -37,15 +37,16 @@ function resolveExtractionToast(error: RuntimeErrorPayload): string {
     case "no-tables":
       return t("toastNoTables")
     case "confluence-invalid-input":
-      return "Enter a valid Confluence Space URL or key"
+      return t("toastConfluenceInvalidInput")
     case "confluence-no-pages":
-      return "No pages found in this Confluence Space"
+      return t("toastConfluenceNoPages")
     case "confluence-no-access":
-      return "No access to some Confluence pages"
+      return t("toastConfluenceNoAccess")
     case "confluence-cancelled":
-      return "Operation cancelled"
+      return t("toastConfluenceCancelled")
     case "confluence-scan-failed":
-      return error.message || "Confluence operation failed"
+    case "confluence-export-failed":
+      return error.message || t("toastConfluenceFailed")
     default:
       return error.message || t("toastError")
   }
@@ -146,7 +147,7 @@ function SidePanel() {
   async function handleExportAllTabs() {
     const hasPermission = await ensureTabsPermission()
     if (!hasPermission) {
-      showToast("Grant tabs permission to export tabs")
+      showToast(t("toastGrantTabsExport"))
       return
     }
 
@@ -199,13 +200,13 @@ function SidePanel() {
   async function handleConfluenceScan() {
     const input = confluenceInput.trim()
     if (!input) {
-      showToast("Enter Confluence Space URL or key")
+      showToast(t("toastConfluenceInvalidInput"))
       return
     }
 
     const hasPermission = await ensureTabsPermission()
     if (!hasPermission) {
-      showToast("Grant tabs permission to scan Confluence pages")
+      showToast(t("toastConfluenceGrantTabsScan"))
       return
     }
 
@@ -231,11 +232,11 @@ function SidePanel() {
       setScanResult(res.data)
       await refreshConfluenceCheckpoint()
       if (res.data.pages.length === 0) {
-        showToast("Scan finished: no pages found")
+        showToast(t("toastConfluenceScanDoneNoPages"))
       } else if (res.data.failed > 0) {
-        showToast(`Scan done: ${res.data.pages.length} pages, ${res.data.failed} failed`)
+        showToast(t("toastConfluenceScanDoneWithFailures", [String(res.data.pages.length), String(res.data.failed)]))
       } else {
-        showToast(`Scan done: ${res.data.pages.length} pages`)
+        showToast(t("toastConfluenceScanDone", String(res.data.pages.length)))
       }
     } catch {
       showToast(t("toastError"))
@@ -248,7 +249,7 @@ function SidePanel() {
   async function handleConfluenceExport() {
     const sourceScan = scanResult ?? checkpoint?.scan ?? null
     if (!sourceScan || sourceScan.pages.length === 0) {
-      showToast("Run scan first")
+      showToast(t("toastConfluenceRunScanFirst"))
       return
     }
 
@@ -275,9 +276,9 @@ function SidePanel() {
       await refreshConfluenceCheckpoint()
 
       if (res.data.failed > 0 || res.data.skipped > 0) {
-        showToast(`Export done: ${res.data.exported} ok, ${res.data.failed} failed`)
+        showToast(t("toastConfluenceExportDoneWithFailures", [String(res.data.exported), String(res.data.failed)]))
       } else {
-        showToast("Confluence export complete")
+        showToast(t("toastConfluenceExportComplete"))
       }
     } catch {
       showToast(t("toastError"))
@@ -290,7 +291,7 @@ function SidePanel() {
     try {
       await sendMessage({ type: "CONFLUENCE_CANCEL" })
       setConfluencePaused(false)
-      showToast("Stopping...")
+      showToast(t("toastConfluenceStopping"))
     } catch {
       showToast(t("toastError"))
     }
@@ -301,11 +302,11 @@ function SidePanel() {
       if (confluencePaused) {
         await sendMessage({ type: "CONFLUENCE_RESUME" })
         setConfluencePaused(false)
-        showToast("Resumed")
+        showToast(t("toastConfluenceResumed"))
       } else {
         await sendMessage({ type: "CONFLUENCE_PAUSE" })
         setConfluencePaused(true)
-        showToast("Paused")
+        showToast(t("toastConfluencePaused"))
       }
     } catch {
       showToast(t("toastError"))
@@ -316,14 +317,14 @@ function SidePanel() {
     if (!checkpoint?.scan) return
     setScanResult(checkpoint.scan)
     setConfluenceInput(checkpoint.spaceUrl)
-    showToast("Loaded last checkpoint")
+    showToast(t("toastConfluenceCheckpointLoaded"))
   }
 
   async function handleConfluenceClearCheckpoint() {
     try {
       await sendMessage({ type: "CONFLUENCE_CHECKPOINT_CLEAR" })
       setCheckpoint(null)
-      showToast("Checkpoint cleared")
+      showToast(t("toastConfluenceCheckpointCleared"))
     } catch {
       showToast(t("toastError"))
     }
@@ -371,7 +372,7 @@ function SidePanel() {
                 : "border-zinc-700 text-zinc-500 hover:text-zinc-300"
             }`}
           >
-            Confluence
+            {t("labelConfluence")}
           </button>
         </div>
       </header>
@@ -435,7 +436,7 @@ function SidePanel() {
 
           {clips.length > 0 && (
             <div class="px-4 py-2 border-t border-zinc-800 flex justify-between items-center">
-              <span class="text-xs text-zinc-600">{clips.length} clips</span>
+              <span class="text-xs text-zinc-600">{t("labelClips", String(clips.length))}</span>
               <button
                 onClick={handleClear}
                 class="text-xs text-zinc-600 hover:text-red-400 transition-colors"
@@ -448,14 +449,14 @@ function SidePanel() {
       ) : (
         <div class="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
           <div class="text-xs text-zinc-400">
-            Enter Confluence Space URL or key, then scan pages and export zip.
+            {t("confluenceIntro")}
           </div>
           <div class="flex gap-2">
             <input
               type="text"
               value={confluenceInput}
               onInput={(event) => setConfluenceInput((event.target as HTMLInputElement).value)}
-              placeholder="https://your-domain.atlassian.net/wiki/spaces/SPACE"
+              placeholder={t("confluenceInputPlaceholder")}
               class="flex-1 bg-zinc-900 border border-zinc-700 rounded px-3 py-1.5 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
             />
           </div>
@@ -465,7 +466,7 @@ function SidePanel() {
               disabled={scanLoading || confluenceExporting}
               class="text-xs px-3 py-1.5 rounded border border-zinc-700 text-zinc-300 hover:border-zinc-500 transition-colors disabled:opacity-40"
             >
-              {scanLoading ? "Scanning..." : "Scan"}
+              {scanLoading ? t("btnScanning") : t("btnScan")}
             </button>
             <button
               onClick={handleConfluenceExport}
@@ -476,42 +477,42 @@ function SidePanel() {
               }
               class="text-xs px-3 py-1.5 rounded bg-emerald-600 text-black font-medium hover:bg-emerald-500 transition-colors disabled:opacity-40"
             >
-              {confluenceExporting ? "Exporting..." : "Export"}
+              {confluenceExporting ? t("btnExporting") : t("btnExport")}
             </button>
             <button
               onClick={handleConfluencePauseResume}
               disabled={!scanLoading && !confluenceExporting}
               class="text-xs px-3 py-1.5 rounded border border-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors disabled:opacity-40"
             >
-              {confluencePaused ? "Resume" : "Pause"}
+              {confluencePaused ? t("btnResume") : t("btnPause")}
             </button>
             <button
               onClick={handleConfluenceCancel}
               disabled={!scanLoading && !confluenceExporting}
               class="text-xs px-3 py-1.5 rounded border border-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors disabled:opacity-40"
             >
-              Stop
+              {t("btnStop")}
             </button>
           </div>
 
           {checkpoint && (
             <div class="rounded border border-zinc-800 bg-zinc-900 p-3 flex items-center justify-between gap-2">
               <div class="text-[11px] text-zinc-500">
-                checkpoint: {checkpoint.spaceKey} · {checkpoint.nextPageIndex}/{checkpoint.totalPages}
-                {checkpoint.completed ? " · complete" : " · resumable"}
+                {t("labelCheckpoint")}: {checkpoint.spaceKey} · {checkpoint.nextPageIndex}/{checkpoint.totalPages}
+                {checkpoint.completed ? ` · ${t("labelComplete")}` : ` · ${t("labelResumable")}`}
               </div>
               <div class="flex gap-1">
                 <button
                   onClick={handleConfluenceUseCheckpoint}
                   class="text-[11px] px-2 py-1 rounded border border-zinc-700 text-zinc-300 hover:border-zinc-500"
                 >
-                  Load
+                  {t("btnLoad")}
                 </button>
                 <button
                   onClick={handleConfluenceClearCheckpoint}
                   class="text-[11px] px-2 py-1 rounded border border-zinc-700 text-zinc-400 hover:text-zinc-200"
                 >
-                  Clear
+                  {t("btnClear")}
                 </button>
               </div>
             </div>
@@ -520,10 +521,11 @@ function SidePanel() {
           {scanResult && (
             <div class="rounded border border-zinc-800 bg-zinc-900 p-3">
               <div class="text-xs text-zinc-300 mb-2">
-                Space: <span class="text-zinc-100">{scanResult.spaceKey}</span>
+                {t("labelSpace")}: <span class="text-zinc-100">{scanResult.spaceKey}</span>
               </div>
               <div class="text-xs text-zinc-500">
-                scanned {scanResult.scanned} · skipped {scanResult.skipped} · failed {scanResult.failed}
+                {t("labelScanned")} {scanResult.scanned} · {t("labelSkipped")} {scanResult.skipped} ·{" "}
+                {t("labelFailed")} {scanResult.failed}
               </div>
             </div>
           )}
@@ -538,13 +540,14 @@ function SidePanel() {
               ))}
             </div>
           ) : (
-            <div class="text-xs text-zinc-600">No scanned pages yet.</div>
+            <div class="text-xs text-zinc-600">{t("confluenceNoPagesYet")}</div>
           )}
 
           {exportResult && (
             <div class="rounded border border-zinc-800 bg-zinc-900 p-3 text-xs text-zinc-400">
-              exported {exportResult.exported} · skipped {exportResult.skipped} · failed {exportResult.failed} ·
-              attachments {exportResult.attachments.length}
+              {t("labelExported")} {exportResult.exported} · {t("labelSkipped")} {exportResult.skipped} ·{" "}
+              {t("labelFailed")} {exportResult.failed} · {t("labelAttachments")}{" "}
+              {exportResult.attachments.length}
             </div>
           )}
         </div>

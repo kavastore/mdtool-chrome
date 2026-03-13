@@ -16,11 +16,22 @@
   "labelPreview": { "message": "Preview" },
   "labelHistory": { "message": "History" },
   "labelSettings": { "message": "Settings" },
+  "labelConfluence": { "message": "Confluence" },
   "labelPrompt": { "message": "Prompt" },
   "labelCustomPrompt": { "message": "Custom prompt" },
   "labelExtractionMode": { "message": "Mode" },
   "labelWordCount": { "message": "$1 words", "placeholders": { "1": { "content": "$1" } } },
   "labelTabs": { "message": "$1 tabs open", "placeholders": { "1": { "content": "$1" } } },
+  "labelClips": { "message": "$1 clips", "placeholders": { "1": { "content": "$1" } } },
+  "labelCheckpoint": { "message": "checkpoint" },
+  "labelComplete": { "message": "complete" },
+  "labelResumable": { "message": "resumable" },
+  "labelSpace": { "message": "Space" },
+  "labelScanned": { "message": "scanned" },
+  "labelSkipped": { "message": "skipped" },
+  "labelFailed": { "message": "failed" },
+  "labelExported": { "message": "exported" },
+  "labelAttachments": { "message": "attachments" },
 
   "modeArticle": { "message": "Article" },
   "modeFull": { "message": "Full page" },
@@ -51,6 +62,39 @@
   "toastNoCodeBlocks": { "message": "No code blocks found on this page" },
   "toastNoTables": { "message": "No tables found on this page" },
   "toastBatchPartial": { "message": "Export finished with some skipped tabs" },
+  "toastGrantTabsExport": { "message": "Grant tabs permission to export tabs" },
+  "toastConfluenceInvalidInput": { "message": "Enter a valid Confluence Space URL or key" },
+  "toastConfluenceNoPages": { "message": "No pages found in this Confluence Space" },
+  "toastConfluenceNoAccess": { "message": "No access to some Confluence pages" },
+  "toastConfluenceCancelled": { "message": "Operation cancelled" },
+  "toastConfluenceFailed": { "message": "Confluence operation failed" },
+  "toastConfluenceGrantTabsScan": { "message": "Grant tabs permission to scan Confluence pages" },
+  "toastConfluenceRunScanFirst": { "message": "Run scan first" },
+  "toastConfluenceStopping": { "message": "Stopping..." },
+  "toastConfluenceResumed": { "message": "Resumed" },
+  "toastConfluencePaused": { "message": "Paused" },
+  "toastConfluenceCheckpointLoaded": { "message": "Loaded last checkpoint" },
+  "toastConfluenceCheckpointCleared": { "message": "Checkpoint cleared" },
+  "toastConfluenceScanDoneNoPages": { "message": "Scan finished: no pages found" },
+  "toastConfluenceScanDone": {
+    "message": "Scan done: $1 pages",
+    "placeholders": { "1": { "content": "$1" } }
+  },
+  "toastConfluenceScanDoneWithFailures": {
+    "message": "Scan done: $1 pages, $2 failed",
+    "placeholders": {
+      "1": { "content": "$1" },
+      "2": { "content": "$2" }
+    }
+  },
+  "toastConfluenceExportDoneWithFailures": {
+    "message": "Export done: $1 ok, $2 failed",
+    "placeholders": {
+      "1": { "content": "$1" },
+      "2": { "content": "$2" }
+    }
+  },
+  "toastConfluenceExportComplete": { "message": "Confluence export complete" },
 
   "ctxSavePage": { "message": "Save page as Markdown" },
   "ctxCopyMd": { "message": "Copy as Markdown" },
@@ -69,9 +113,21 @@
 
   "noHistory": { "message": "No saved clips yet" },
   "searchPlaceholder": { "message": "Search history…" },
+  "confluenceIntro": { "message": "Enter Confluence Space URL or key, then scan pages and export zip." },
+  "confluenceInputPlaceholder": { "message": "https://your-domain.atlassian.net/wiki/spaces/SPACE" },
+  "confluenceNoPagesYet": { "message": "No scanned pages yet." },
   "customPromptPlaceholder": { "message": "Enter your prompt…" },
   "customAiUrl": { "message": "Custom AI URL" },
   "customAiUrlPlaceholder": { "message": "https://…" },
+  "btnScan": { "message": "Scan" },
+  "btnScanning": { "message": "Scanning..." },
+  "btnExport": { "message": "Export" },
+  "btnExporting": { "message": "Exporting..." },
+  "btnPause": { "message": "Pause" },
+  "btnResume": { "message": "Resume" },
+  "btnStop": { "message": "Stop" },
+  "btnLoad": { "message": "Load" },
+  "btnClear": { "message": "Clear" },
 
   "settingsDefaultAi": { "message": "Default AI service" },
   "settingsDefaultPrompt": { "message": "Default prompt" },

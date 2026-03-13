@@ -16,11 +16,22 @@
   "labelPreview": { "message": "Предпросмотр" },
   "labelHistory": { "message": "История" },
   "labelSettings": { "message": "Настройки" },
+  "labelConfluence": { "message": "Confluence" },
   "labelPrompt": { "message": "Промпт" },
   "labelCustomPrompt": { "message": "Свой промпт" },
   "labelExtractionMode": { "message": "Режим" },
   "labelWordCount": { "message": "$1 слов", "placeholders": { "1": { "content": "$1" } } },
   "labelTabs": { "message": "$1 вкладок открыто", "placeholders": { "1": { "content": "$1" } } },
+  "labelClips": { "message": "$1 клипов", "placeholders": { "1": { "content": "$1" } } },
+  "labelCheckpoint": { "message": "чекпоинт" },
+  "labelComplete": { "message": "завершено" },
+  "labelResumable": { "message": "можно продолжить" },
+  "labelSpace": { "message": "Пространство" },
+  "labelScanned": { "message": "просканировано" },
+  "labelSkipped": { "message": "пропущено" },
+  "labelFailed": { "message": "ошибок" },
+  "labelExported": { "message": "экспортировано" },
+  "labelAttachments": { "message": "вложений" },
 
   "modeArticle": { "message": "Статья" },
   "modeFull": { "message": "Вся страница" },
@@ -51,6 +62,39 @@
   "toastNoCodeBlocks": { "message": "На странице не найдено блоков кода" },
   "toastNoTables": { "message": "На странице не найдено таблиц" },
   "toastBatchPartial": { "message": "Экспорт завершён, часть вкладок пропущена" },
+  "toastGrantTabsExport": { "message": "Разрешите доступ к вкладкам для экспорта" },
+  "toastConfluenceInvalidInput": { "message": "Введите корректный URL или ключ Confluence Space" },
+  "toastConfluenceNoPages": { "message": "В этом Confluence Space страницы не найдены" },
+  "toastConfluenceNoAccess": { "message": "Нет доступа к некоторым страницам Confluence" },
+  "toastConfluenceCancelled": { "message": "Операция отменена" },
+  "toastConfluenceFailed": { "message": "Ошибка операции Confluence" },
+  "toastConfluenceGrantTabsScan": { "message": "Разрешите доступ к вкладкам для сканирования Confluence" },
+  "toastConfluenceRunScanFirst": { "message": "Сначала запустите сканирование" },
+  "toastConfluenceStopping": { "message": "Останавливаем..." },
+  "toastConfluenceResumed": { "message": "Продолжено" },
+  "toastConfluencePaused": { "message": "Пауза" },
+  "toastConfluenceCheckpointLoaded": { "message": "Последний чекпоинт загружен" },
+  "toastConfluenceCheckpointCleared": { "message": "Чекпоинт очищен" },
+  "toastConfluenceScanDoneNoPages": { "message": "Сканирование завершено: страницы не найдены" },
+  "toastConfluenceScanDone": {
+    "message": "Сканирование завершено: $1 страниц",
+    "placeholders": { "1": { "content": "$1" } }
+  },
+  "toastConfluenceScanDoneWithFailures": {
+    "message": "Сканирование завершено: $1 страниц, $2 ошибок",
+    "placeholders": {
+      "1": { "content": "$1" },
+      "2": { "content": "$2" }
+    }
+  },
+  "toastConfluenceExportDoneWithFailures": {
+    "message": "Экспорт завершен: $1 успешно, $2 ошибок",
+    "placeholders": {
+      "1": { "content": "$1" },
+      "2": { "content": "$2" }
+    }
+  },
+  "toastConfluenceExportComplete": { "message": "Экспорт Confluence завершен" },
 
   "ctxSavePage": { "message": "Сохранить страницу как Markdown" },
   "ctxCopyMd": { "message": "Копировать как Markdown" },
@@ -69,9 +113,21 @@
 
   "noHistory": { "message": "Сохранённых клипов пока нет" },
   "searchPlaceholder": { "message": "Поиск по истории…" },
+  "confluenceIntro": { "message": "Введите URL или ключ Confluence Space, затем просканируйте страницы и экспортируйте zip." },
+  "confluenceInputPlaceholder": { "message": "https://your-domain.atlassian.net/wiki/spaces/SPACE" },
+  "confluenceNoPagesYet": { "message": "Просканированных страниц пока нет." },
   "customPromptPlaceholder": { "message": "Введите промпт…" },
   "customAiUrl": { "message": "URL своего AI" },
   "customAiUrlPlaceholder": { "message": "https://…" },
+  "btnScan": { "message": "Сканировать" },
+  "btnScanning": { "message": "Сканирование..." },
+  "btnExport": { "message": "Экспорт" },
+  "btnExporting": { "message": "Экспорт..." },
+  "btnPause": { "message": "Пауза" },
+  "btnResume": { "message": "Продолжить" },
+  "btnStop": { "message": "Стоп" },
+  "btnLoad": { "message": "Загрузить" },
+  "btnClear": { "message": "Очистить" },
 
   "settingsDefaultAi": { "message": "AI по умолчанию" },
   "settingsDefaultPrompt": { "message": "Промпт по умолчанию" },

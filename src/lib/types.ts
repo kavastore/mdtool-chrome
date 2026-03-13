@@ -38,6 +38,7 @@ export type ExtractionErrorCode =
   | "save-failed"
   | "confluence-invalid-input"
   | "confluence-scan-failed"
+  | "confluence-export-failed"
   | "confluence-no-pages"
   | "confluence-no-access"
   | "confluence-cancelled"
@@ -95,6 +96,7 @@ export interface ConfluencePageNode {
   title: string
   breadcrumbs: string[]
   depth: number
+  parentId?: string
 }
 
 export interface ConfluenceScanFailure {

@@ -287,7 +287,7 @@ async function handleMessage(msg: Record<string, unknown>) {
         return {
           ok: false,
           error: toError(
-            isCancelled ? "confluence-cancelled" : "confluence-scan-failed",
+            isCancelled ? "confluence-cancelled" : "confluence-export-failed",
             isCancelled
               ? "Confluence export cancelled"
               : error instanceof Error
@@ -1406,7 +1406,7 @@ async function scanConfluenceSpace(
   options: { maxPages: number; maxDepth: number }
 ): Promise<ConfluenceScanResult> {
   const seed = await resolveConfluenceSeed(input)
-  const queue: Array<{ url: string; depth: number }> = [{ url: seed.spaceUrl, depth: 0 }]
+  const queue: Array<{ url: string; depth: number; parentUrl?: string }> = [{ url: seed.spaceUrl, depth: 0 }]
   const queued = new Set([seed.spaceUrl])
   const visited = new Set<string>()
   const pages = new Map<string, ConfluencePageNode>()
@@ -1434,6 +1434,7 @@ async function scanConfluenceSpace(
     try {
       const snapshot = await withConfluenceRetry(() => scanConfluencePageByUrl(normalizedCurrent))
       const pageUrl = cleanConfluenceUrl(snapshot.url || normalizedCurrent)
+      const parentId = current.parentUrl ? buildPageNodeId(cleanConfluenceUrl(current.parentUrl)) : undefined
 
       if (!pages.has(pageUrl)) {
         pages.set(pageUrl, {
@@ -1442,8 +1443,13 @@ async function scanConfluenceSpace(
           title: snapshot.title || pageUrl,
           breadcrumbs: snapshot.breadcrumbs,
           depth: current.depth,
+          parentId,
         })
       } else {
+        const existingNode = pages.get(pageUrl)
+        if (existingNode && !existingNode.parentId && parentId) {
+          pages.set(pageUrl, { ...existingNode, parentId })
+        }
         skipped += 1
       }
 
@@ -1469,7 +1475,7 @@ async function scanConfluenceSpace(
           skipped += 1
           continue
         }
-        queue.push({ url: nextUrl, depth: current.depth + 1 })
+        queue.push({ url: nextUrl, depth: current.depth + 1, parentUrl: pageUrl })
         queued.add(nextUrl)
       }
     } catch (error) {
@@ -1495,17 +1501,85 @@ async function scanConfluenceSpace(
   }
 }
 
-function buildConfluencePagePath(page: ConfluencePageNode): string {
-  const crumbs = page.breadcrumbs
-    .map((crumb) => sanitizePathSegment(crumb, "section"))
-    .filter((crumb) => !!crumb)
-
-  const titlePart = sanitizePathSegment(page.title, page.id)
-  const folderParts = crumbs.length > 1 ? crumbs.slice(0, Math.min(crumbs.length - 1, 3)) : []
-  if (folderParts.length === 0) {
-    return `${titlePart}.md`
+function ensureUniqueConfluenceMarkdownPath(initialPath: string, usedPaths: Set<string>): string {
+  if (!usedPaths.has(initialPath)) {
+    usedPaths.add(initialPath)
+    return initialPath
   }
-  return `${folderParts.join("/")}/${titlePart}.md`
+
+  const parts = initialPath.split("/")
+  const fileName = parts.pop() || "page.md"
+  const dotIndex = fileName.lastIndexOf(".")
+  const stem = dotIndex > 0 ? fileName.slice(0, dotIndex) : fileName
+  const ext = dotIndex > 0 ? fileName.slice(dotIndex) : ".md"
+
+  for (let index = 2; index < 1000; index++) {
+    const nextName = `${stem}-${index}${ext}`
+    const nextPath = parts.length > 0 ? `${parts.join("/")}/${nextName}` : nextName
+    if (!usedPaths.has(nextPath)) {
+      usedPaths.add(nextPath)
+      return nextPath
+    }
+  }
+
+  const fallbackName = `${stem}-${Date.now()}${ext}`
+  const fallbackPath = parts.length > 0 ? `${parts.join("/")}/${fallbackName}` : fallbackName
+  usedPaths.add(fallbackPath)
+  return fallbackPath
+}
+
+function buildConfluencePagePathMap(pages: ConfluencePageNode[]): Map<string, string> {
+  const pagesById = new Map(pages.map((page) => [page.id, page]))
+  const folderCache = new Map<string, string[]>()
+
+  const resolveParentFolders = (pageId: string, stack = new Set<string>()): string[] => {
+    const cached = folderCache.get(pageId)
+    if (cached) return cached
+
+    const page = pagesById.get(pageId)
+    if (!page || !page.parentId) {
+      folderCache.set(pageId, [])
+      return []
+    }
+    if (stack.has(pageId)) {
+      folderCache.set(pageId, [])
+      return []
+    }
+
+    const parent = pagesById.get(page.parentId)
+    if (!parent) {
+      folderCache.set(pageId, [])
+      return []
+    }
+
+    stack.add(pageId)
+    const parentFolders = resolveParentFolders(parent.id, stack)
+    stack.delete(pageId)
+
+    const currentFolders = [...parentFolders, sanitizePathSegment(parent.title, parent.id)]
+    folderCache.set(pageId, currentFolders)
+    return currentFolders
+  }
+
+  const pathByPageId = new Map<string, string>()
+  const usedPaths = new Set<string>()
+  const orderedPages = pages
+    .slice()
+    .sort((a, b) => a.depth - b.depth || a.title.localeCompare(b.title) || a.id.localeCompare(b.id))
+
+  for (const page of orderedPages) {
+    const folderParts = resolveParentFolders(page.id)
+    const titlePart = sanitizePathSegment(page.title, page.id)
+    const basePath = [...folderParts, `${titlePart}.md`].join("/")
+    const uniquePath = ensureUniqueConfluenceMarkdownPath(basePath || `${page.id}.md`, usedPaths)
+    pathByPageId.set(page.id, uniquePath)
+  }
+
+  return pathByPageId
+}
+
+function resolveConfluencePagePath(page: ConfluencePageNode, pagePathById: Map<string, string>): string {
+  return pagePathById.get(page.id) || `${sanitizePathSegment(page.title, page.id)}.md`
 }
 
 async function collectConfluenceAttachmentUrls(tabId: number): Promise<string[]> {
@@ -1643,14 +1717,15 @@ async function detectConfluenceNoAccess(tabId: number): Promise<boolean> {
 
 function buildFailedPageResult(
   page: ConfluencePageNode,
-  error: ExtractionErrorDetails
+  error: ExtractionErrorDetails,
+  pagePath: string
 ): ConfluenceExportPageResult {
   return {
     pageId: page.id,
     title: page.title,
     url: page.url,
     breadcrumbs: page.breadcrumbs,
-    path: buildConfluencePagePath(page),
+    path: pagePath,
     markdown: "",
     attachments: 0,
     status: "failed",
@@ -1661,14 +1736,15 @@ function buildFailedPageResult(
 function buildSkippedPageResult(
   page: ConfluencePageNode,
   reason: ConfluenceExportPageResult["skipReason"],
-  error?: ExtractionErrorDetails
+  error?: ExtractionErrorDetails,
+  pagePath?: string
 ): ConfluenceExportPageResult {
   return {
     pageId: page.id,
     title: page.title,
     url: page.url,
     breadcrumbs: page.breadcrumbs,
-    path: buildConfluencePagePath(page),
+    path: pagePath || `${sanitizePathSegment(page.title, page.id)}.md`,
     markdown: "",
     attachments: 0,
     status: "skipped",
@@ -1700,7 +1776,7 @@ function ensureUniqueAttachmentFileName(fileName: string, usedNames: Set<string>
   return fallbackName
 }
 
-async function exportConfluencePageOnce(page: ConfluencePageNode): Promise<{
+async function exportConfluencePageOnce(page: ConfluencePageNode, pagePath: string): Promise<{
   pageResult: ConfluenceExportPageResult
   attachments: ConfluenceAttachmentFile[]
 }> {
@@ -1714,7 +1790,8 @@ async function exportConfluencePageOnce(page: ConfluencePageNode): Promise<{
         pageResult: buildSkippedPageResult(
           page,
           "no-access",
-          toError("confluence-no-access", "No access to this Confluence page")
+          toError("confluence-no-access", "No access to this Confluence page"),
+          pagePath
         ),
         attachments: [],
       }
@@ -1726,13 +1803,12 @@ async function exportConfluencePageOnce(page: ConfluencePageNode): Promise<{
     })
     if ("error" in extraction) {
       return {
-        pageResult: buildFailedPageResult(page, extraction.error),
+        pageResult: buildFailedPageResult(page, extraction.error, pagePath),
         attachments: [],
       }
     }
 
     let markdown = extraction.data.markdown
-    const pagePath = buildConfluencePagePath(page)
     const pageDir = pagePath.includes("/") ? pagePath.split("/").slice(0, -1).join("/") : ""
 
     const attachmentUrls = await withConfluenceRetry(() => collectConfluenceAttachmentUrls(tabId!))
@@ -1790,6 +1866,14 @@ async function exportConfluenceSpace(
   const pagesById = new Map<string, ConfluenceExportPageResult>(checkpoint.pages.map((page) => [page.pageId, page]))
   let attachments = checkpoint.attachments.slice()
   const seenPageUrls = new Set<string>()
+  const pagePathById = buildConfluencePagePathMap(scan.pages)
+
+  for (const page of scan.pages) {
+    const existing = pagesById.get(page.id)
+    if (existing) {
+      existing.path = resolveConfluencePagePath(page, pagePathById)
+    }
+  }
 
   for (const existingPage of pagesById.values()) {
     if (existingPage.status === "exported" || existingPage.status === "skipped") {
@@ -1803,6 +1887,7 @@ async function exportConfluenceSpace(
 
   for (let index = 0; index < scan.pages.length; index++) {
     const page = scan.pages[index]
+    const pagePath = resolveConfluencePagePath(page, pagePathById)
     throwIfConfluenceCancelled()
     await waitIfConfluencePaused()
     await applyConfluenceRateLimit(index)
@@ -1814,7 +1899,7 @@ async function exportConfluenceSpace(
 
     const normalizedPageUrl = cleanConfluenceUrl(page.url)
     if (seenPageUrls.has(normalizedPageUrl)) {
-      pagesById.set(page.id, buildSkippedPageResult(page, "duplicate"))
+      pagesById.set(page.id, buildSkippedPageResult(page, "duplicate", undefined, pagePath))
       checkpoint.pages = withCheckpointPageOrder(scan, pagesById)
       checkpoint.nextPageIndex = index + 1
       checkpoint.updatedAt = new Date().toISOString()
@@ -1824,7 +1909,7 @@ async function exportConfluenceSpace(
     seenPageUrls.add(normalizedPageUrl)
 
     try {
-      const pageAttempt = await withConfluenceRetry(() => exportConfluencePageOnce(page))
+      const pageAttempt = await withConfluenceRetry(() => exportConfluencePageOnce(page, pagePath))
       pagesById.set(page.id, pageAttempt.pageResult)
       attachments = mergeAttachment(attachments, pageAttempt.attachments)
     } catch (error) {
@@ -1833,9 +1918,10 @@ async function exportConfluenceSpace(
         buildFailedPageResult(
           page,
           toError(
-            "confluence-scan-failed",
+            "confluence-export-failed",
             error instanceof Error ? error.message : "Confluence export failed for page"
-          )
+          ),
+          pagePath
         )
       )
     }

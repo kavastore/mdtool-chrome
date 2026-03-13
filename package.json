@@ -25,6 +25,9 @@
   "scripts": {
     "dev": "plasmo dev",
     "build": "plasmo build && npm run copy-locales",
+    "typecheck": "tsc --noEmit",
+    "lint": "npm run typecheck",
+    "test": "echo \"No automated tests yet\"",
     "package": "plasmo package",
     "copy-locales": "cp -r _locales build/chrome-mv3-prod/ 2>/dev/null; cp -r _locales build/chrome-mv3-dev/ 2>/dev/null; true"
   },
