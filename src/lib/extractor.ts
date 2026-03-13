@@ -123,15 +123,21 @@ function sanitizeHtml(html: string): string {
       : (maybeFactory as { sanitize: (dirty: string, config?: Record<string, unknown>) => string })
 
   return purifier.sanitize(html, {
-    FORBID_TAGS: ["script", "style", "iframe", "object", "embed"],
-    FORBID_ATTR: ["onclick", "onerror", "onload"],
+    FORBID_TAGS: ["script", "style", "iframe", "object", "embed", "form", "input", "button", "base"],
+    FORBID_ATTR: ["onclick", "onerror", "onload", "onmouseover", "onfocus", "onblur", "action", "formaction"],
+    ALLOW_UNKNOWN_PROTOCOLS: false,
+    FORCE_BODY: true,
   })
 }
 
 function normalizeMarkdownLinks(markdown: string): string {
   return markdown
+    // Remove empty-text links: [](url) → url
     .replace(/\[\s*\]\(([^)]+)\)/g, "$1")
-    .replace(/\[([^\]]+)\]\(((?:javascript|data):[^)]+)\)/gi, "$1")
+    // Strip dangerous URI schemes from [text](scheme:...) → text
+    .replace(/\[([^\]]+)\]\(((?:javascript|data|vbscript):[^)]*)\)/gi, "$1")
+    // Strip dangerous autolinks: <javascript:...> → (removed)
+    .replace(/<(?:javascript|data|vbscript):[^>]*>/gi, "")
 }
 
 function isTableLine(line: string): boolean {

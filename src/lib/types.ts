@@ -149,7 +149,7 @@ export interface ConfluenceExportPageResult {
   markdown: string
   attachments: number
   status: "exported" | "skipped" | "failed"
-  skipReason?: "duplicate" | "no-access" | "already-exported"
+  skipReason?: "duplicate" | "no-access" | "not-found" | "already-exported"
   error?: ExtractionErrorDetails
 }
 

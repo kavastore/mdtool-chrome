@@ -1525,12 +1525,17 @@ function normalizeSpaceKey(value: string): string {
 }
 
 function buildPageNodeId(url: string): string {
-  let hash = 0
+  // Two independent 32-bit FNV-1a–style hashes to reduce collision probability.
+  let h1 = 0x811c9dc5
+  let h2 = 0x1000193
   for (let i = 0; i < url.length; i++) {
-    hash = (hash << 5) - hash + url.charCodeAt(i)
-    hash |= 0
+    const c = url.charCodeAt(i)
+    h1 = Math.imul(h1 ^ c, 0x01000193)
+    h2 = Math.imul(h2 ^ c, 0x811c9dc5)
   }
-  return `cf-${Math.abs(hash)}`
+  const hex1 = (h1 >>> 0).toString(16).padStart(8, "0")
+  const hex2 = (h2 >>> 0).toString(16).padStart(8, "0")
+  return `cf-${hex1}${hex2}`
 }
 
 function sanitizePathSegment(value: string, fallback: string): string {
@@ -1595,6 +1600,9 @@ async function openHiddenTab(url: string): Promise<number> {
     throw new Error(`Could not open tab for: ${url}`)
   }
   await waitForTabComplete(tab.id)
+  // Confluence pages are SPAs that continue rendering after the load event.
+  // A short extra wait lets the framework hydrate before we attempt extraction.
+  await sleep(400)
   return tab.id
 }
 
@@ -1679,6 +1687,14 @@ function resolveConfluenceApiUrl(pathOrUrl: string, origin: string, baseHint?: s
 
     if (baseHint) {
       try {
+        if (trimmed.startsWith("/")) {
+          // Absolute path: concatenate with baseHint so the base path (e.g. /wiki)
+          // is preserved. new URL("/path", "https://host/wiki/") would strip /wiki,
+          // so we string-concat instead: "https://host/wiki" + "/spaces/..." → correct.
+          const base = baseHint.endsWith("/") ? baseHint.slice(0, -1) : baseHint
+          return cleanConfluenceUrl(new URL(base + trimmed).toString())
+        }
+        // Relative path: resolve normally against the base.
         const baseForRelative = baseHint.endsWith("/") ? baseHint : `${baseHint}/`
         return cleanConfluenceUrl(new URL(trimmed, baseForRelative).toString())
       } catch {
@@ -2649,13 +2665,29 @@ function rewriteAttachmentUrls(markdown: string, rewrites: Array<{ sourceUrl: st
   return updated
 }
 
-async function detectConfluenceNoAccess(tabId: number): Promise<boolean> {
+type ConfluencePageBlockReason = "no-access" | "not-found"
+
+async function detectConfluencePageBlock(tabId: number): Promise<ConfluencePageBlockReason | null> {
   try {
     const [{ result }] = await chrome.scripting.executeScript({
       target: { tabId },
-      func: () => {
-        const text = document.body?.innerText?.toLowerCase() || ""
-        return (
+      func: (): "no-access" | "not-found" | null => {
+        const text = (document.body?.innerText || "").toLowerCase()
+        const title = (document.title || "").toLowerCase()
+
+        // 404 / page-not-found errors (Atlassian Cloud "Page Unavailable" notification)
+        if (
+          title.includes("page unavailable") ||
+          title.includes("page not found") ||
+          text.includes("page not found") ||
+          text.includes("page unavailable") ||
+          (text.includes("404") && (text.includes("request id") || text.includes("not found")))
+        ) {
+          return "not-found"
+        }
+
+        // Permission / access errors
+        if (
           text.includes("you don't have access") ||
           text.includes("you do not have access") ||
           text.includes("you don't have permission") ||
@@ -2663,12 +2695,16 @@ async function detectConfluenceNoAccess(tabId: number): Promise<boolean> {
           text.includes("request access") ||
           text.includes("access denied") ||
           text.includes("insufficient permissions")
-        )
+        ) {
+          return "no-access"
+        }
+
+        return null
       },
     })
-    return Boolean(result)
+    return (result as ConfluencePageBlockReason | null | undefined) ?? null
   } catch {
-    return false
+    return null
   }
 }
 
@@ -2741,13 +2777,24 @@ async function exportConfluencePageOnce(page: ConfluencePageNode, pagePath: stri
   try {
     tabId = await openHiddenTab(page.url)
 
-    const noAccess = await detectConfluenceNoAccess(tabId)
-    if (noAccess) {
+    const blockReason = await detectConfluencePageBlock(tabId)
+    if (blockReason === "no-access") {
       return {
         pageResult: buildSkippedPageResult(
           page,
           "no-access",
           toError("confluence-no-access", "No access to this Confluence page"),
+          pagePath
+        ),
+        attachments: [],
+      }
+    }
+    if (blockReason === "not-found") {
+      return {
+        pageResult: buildSkippedPageResult(
+          page,
+          "not-found",
+          toError("confluence-no-access", "Page not found or unavailable (404)"),
           pagePath
         ),
         attachments: [],
