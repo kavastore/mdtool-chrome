@@ -97,7 +97,7 @@ function ensureUniquePath(initialPath: string, usedPaths: Set<string>): { path: 
     }
   }
 
-  const lastResort = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext || ".md"}`
+  const lastResort = `${Date.now()}-${crypto.randomUUID().slice(0, 8)}${ext || ".md"}`
   const lastPath = dir ? `${dir}/${lastResort}` : lastResort
   usedPaths.add(lastPath)
   return { path: lastPath, collisionResolved: true }
