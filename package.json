@@ -1,0 +1,66 @@
+{
+  "name": "mdtool-chrome",
+  "displayName": "mdtool.site Clipper",
+  "version": "0.1.0",
+  "description": "Любая страница → чистый Markdown → в AI за один клик",
+  "author": "mdtool.site",
+  "scripts": {
+    "dev": "plasmo dev",
+    "build": "plasmo build && npm run copy-locales",
+    "package": "plasmo package",
+    "copy-locales": "cp -r _locales build/chrome-mv3-prod/ 2>/dev/null; cp -r _locales build/chrome-mv3-dev/ 2>/dev/null; true"
+  },
+  "dependencies": {
+    "@mozilla/readability": "^0.5.0",
+    "@plasmohq/storage": "^1.15.0",
+    "dompurify": "^3.1.6",
+    "jszip": "^3.10.1",
+    "plasmo": "^0.90.0",
+    "preact": "^10.23.1",
+    "turndown": "^7.2.0",
+    "turndown-plugin-gfm": "^1.0.2"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.258",
+    "@types/dompurify": "^3.0.5",
+    "@types/node": "^20.11.5",
+    "@types/turndown": "^5.0.4",
+    "autoprefixer": "^10.4.27",
+    "postcss": "^8.5.8",
+    "tailwindcss": "^3.4.19",
+    "typescript": "^5.3.3"
+  },
+  "manifest": {
+    "name": "__MSG_appName__",
+    "description": "__MSG_appDescription__",
+    "default_locale": "en",
+    "permissions": [
+      "activeTab",
+      "scripting",
+      "storage",
+      "downloads",
+      "contextMenus",
+      "sidePanel"
+    ],
+    "optional_permissions": [
+      "alarms",
+      "offscreen",
+      "tabs"
+    ],
+    "commands": {
+      "quick-save": {
+        "suggested_key": {
+          "default": "Alt+Shift+S",
+          "mac": "Alt+Shift+S"
+        },
+        "description": "__MSG_commandQuickSave__"
+      }
+    },
+    "side_panel": {
+      "default_path": "sidepanel.html"
+    },
+    "content_security_policy": {
+      "extension_pages": "script-src 'self'; object-src 'self';"
+    }
+  }
+}
